@@ -115,7 +115,10 @@ def create_system_monitor():
 
 def create_network_button():
     """Create network manager button"""
-    button = Gtk.Button(label="🌐")
+    button = Gtk.Button()
+    button.set_relief(Gtk.ReliefStyle.NONE)
+    icon = Gtk.Image.new_from_icon_name("network-wireless-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+    button.add(icon)
     button.connect('clicked', lambda w: subprocess.Popen(['nm-connection-editor']))
     return button
 
@@ -228,6 +231,7 @@ def create_llm_interface_button():
 def create_tts_button():
     """Create text-to-speech button"""
     button = Gtk.Button()
+    button.set_relief(Gtk.ReliefStyle.NONE)
     icon = Gtk.Image.new_from_icon_name("audio-speakers-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
     button.add(icon)
     
@@ -247,9 +251,10 @@ def create_tts_button():
 def create_voice_input():
     """Create voice input button that sends to Whisper server"""
     button = Gtk.Button()
+    button.set_relief(Gtk.ReliefStyle.NONE)
     stream = None
     record_start_time = 0
-    recording = False  # Add this line to define the recording variable
+    recording = False
     
     # Create icons
     mic_icon = Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
@@ -257,10 +262,10 @@ def create_voice_input():
     button.add(mic_icon)
     
     def start_recording(*args):
-        nonlocal stream, record_start_time, recording  # Add 'recording' here
+        nonlocal stream, record_start_time, recording
         audio_data.clear()
         record_start_time = time.time()
-        recording = True  # Set recording to True when starting
+        recording = True
         
         # Swap to record icon
         button.remove(button.get_child())
@@ -268,7 +273,7 @@ def create_voice_input():
         button.show_all()
         
         def audio_callback(indata, frames, time, status):
-            nonlocal recording  # Add this line to access the 'recording' variable
+            nonlocal recording
             if recording:
                 audio_data.append(indata.copy())
         
@@ -293,9 +298,9 @@ def create_voice_input():
             button.show_all()
     
     def stop_recording(*args):
-        nonlocal stream, record_start_time, recording  # Add 'recording' here
+        nonlocal stream, record_start_time, recording
         print("DEBUG: Stopping recording")
-        recording = False  # Set recording to False when stopping
+        recording = False
         recording_duration = time.time() - record_start_time
         
         # Swap back to mic icon
@@ -561,77 +566,58 @@ def setup_panels():
 
 def setup_styles():
     css = b"""
-    .launcher-button {
-        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
-        color: #1a1b26;
-        border: none;
-        border-radius: 12px;
-        padding: 0 10px;
-        font-weight: 600;
-    }
-    
-    .launcher-button:hover {
-        background: linear-gradient(135deg, #88b0ff, #33d1ed);
-    }
-    
-    .launcher-button:active {
-        background: linear-gradient(135deg, #6992e3, #29b2cc);
-    }
-    
-    .active-workspace {
-        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
-        color: #1a1b26;
-        border: none;
-        border-radius: 8px;
-    }
-    
-    .active-window {
-        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
-        color: #1a1b26;
-        border: none;
-    }
-    
     button {
-    background: #292e42;
-    color: #7aa2f7;  /* Change the color to blue */
-    border: 1px solid #3b4261;
-    border-radius: 8px;
-    padding: 2px 8px;
+        background: none;
+        color: #7aa2f7;
+        border: 1px solid #7aa2f7;
+        border-radius: 12px;
+        padding: 8px 20px;
+        font-size: 15px
     }
 
     button:hover {
-        background: #343b58;
-        border-color: #7aa2f7;
-        color: #a9c0ff;  /* Lighter blue on hover */
+        border-color: #88b0ff;
+        color: #88b0ff
     }
 
     button:active {
-        background: #1a1b26;
-        color: #6b8ee6;  /* Darker blue when active */
+        border-color: #6992e3;
+        color: #6992e3
     }
-        
-    label {
-        color: #c0caf5;
+
+    button image {
+        color: #7aa2f7
     }
-    
+
+    button:hover image {
+        color: #88b0ff
+    }
+
+    button:active image {
+        color: #6992e3
+    }
+
     .monitor-label {
         font-family: monospace;
         padding: 0 4px;
-        min-width: 100px;
+        min-width: 100px
     }
-    
+
     .clock-label {
         font-family: monospace;
         padding: 0 4px;
-        min-width: 180px;
+        min-width: 180px
     }
-    
+
     .recording {
-        background-color: #f7768e;
-        border: 2px solid #ff99a3;
-        color: white;  /* White icon when recording */
+        border: 2px solid #f7768e;
+        background: none
     }
-    """
+
+    .recording image {
+        color: #f7768e
+    }
+"""
     style_provider = Gtk.CssProvider()
     style_provider.load_from_data(css)
     Gtk.StyleContext.add_provider_for_screen(
