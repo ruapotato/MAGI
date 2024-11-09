@@ -475,19 +475,43 @@ def create_panel(position='top'):
 
     def draw_panel_background(widget, ctx):
         """Draw panel background with Tokyo Night colors"""
-        # Tokyo Night background color with transparency
         ctx.set_source_rgba(0.10, 0.11, 0.15, 0.95)  # #1a1b26 with 0.95 alpha
         ctx.set_operator(cairo.OPERATOR_SOURCE)
         ctx.paint()
         return False
+    
+    def get_primary_monitor():
+        """Get the primary monitor with fallback logic"""
+        display = Gdk.Display.get_default()
+        
+        # First try getting primary monitor
+        primary = display.get_primary_monitor()
+        if primary:
+            return primary
+            
+        # If no primary monitor, try finding one marked as primary
+        n_monitors = display.get_n_monitors()
+        for i in range(n_monitors):
+            monitor = display.get_monitor(i)
+            if monitor.is_primary():
+                return monitor
+        
+        # If still no primary monitor found, check which one has 0,0 coordinates
+        for i in range(n_monitors):
+            monitor = display.get_monitor(i)
+            geometry = monitor.get_geometry()
+            if geometry.x == 0 and geometry.y == 0:
+                return monitor
+        
+        # Last resort: return first monitor
+        return display.get_monitor(0)
     
     def set_struts():
         """Set window struts using xprop"""
         if not window.get_window():
             return False
             
-        display = Gdk.Display.get_default()
-        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        monitor = get_primary_monitor()
         geometry = monitor.get_geometry()
         
         width = geometry.width
@@ -503,7 +527,7 @@ def create_panel(position='top'):
         try:
             xid = window.get_window().get_xid()
             
-            # Set basic struts
+            # Set basic struts relative to monitor position
             if position == 'top':
                 subprocess.run(['xprop', '-id', str(xid), 
                               '-f', '_NET_WM_STRUT', '32c',
@@ -535,20 +559,21 @@ def create_panel(position='top'):
         return True
 
     def update_geometry(*args):
-        """Update panel position and size"""
-        display = Gdk.Display.get_default()
-        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        """Update panel position and size based on primary monitor"""
+        monitor = get_primary_monitor()
         geometry = monitor.get_geometry()
+        scale_factor = monitor.get_scale_factor()
         
-        width = geometry.width
+        # Apply scale factor to dimensions
+        width = geometry.width // scale_factor
         height = config['panel_height']
-        x_offset = geometry.x
-        y_offset = geometry.y
+        x_offset = geometry.x // scale_factor
+        y_offset = geometry.y // scale_factor
         
         if position == 'top':
             window.move(x_offset, y_offset)
         else:
-            window.move(x_offset, y_offset + geometry.height - height)
+            window.move(x_offset, y_offset + (geometry.height // scale_factor) - height)
         
         window.set_size_request(width, height)
         window.resize(width, height)
@@ -557,8 +582,36 @@ def create_panel(position='top'):
         GLib.idle_add(set_struts)
         return False
 
-    # Set up visual for transparency
+    # Set up monitor change detection using screen signals
+    def on_screen_changed(screen, *args):
+        GLib.idle_add(update_geometry)
+    
+    def on_monitors_changed(display, *args):
+        GLib.idle_add(update_geometry)
+    
+    # Connect to both screen and display signals for maximum compatibility
     screen = window.get_screen()
+    screen.connect('monitors-changed', on_screen_changed)
+    
+    display = Gdk.Display.get_default()
+    display.connect('monitor-added', on_monitors_changed)
+    display.connect('monitor-removed', on_monitors_changed)
+    
+    # Also poll periodically for changes
+    def check_monitor_changes():
+        static_data = getattr(window, '_monitor_data', None)
+        monitor = get_primary_monitor()
+        geometry = monitor.get_geometry()
+        current_data = (geometry.x, geometry.y, geometry.width, geometry.height)
+        
+        if static_data != current_data:
+            window._monitor_data = current_data
+            update_geometry()
+        return True
+    
+    GLib.timeout_add(2000, check_monitor_changes)
+    
+    # Set up visual for transparency
     visual = screen.get_rgba_visual()
     if visual and screen.is_composited():
         window.set_visual(visual)
@@ -579,7 +632,6 @@ def create_panel(position='top'):
     GLib.idle_add(update_geometry)
     
     return window, box
-
 
 def draw_panel_background(widget, ctx):
     """Draw panel background with Tokyo Night colors"""
