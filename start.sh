@@ -30,6 +30,24 @@ export XDG_CACHE_HOME="$HOME/.cache"
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_RUNTIME_DIR="/run/user/$UID"
 
+# Start Whisper server if not already running
+if ! pgrep -f "python.*server.py" > /dev/null; then
+    echo "Starting Whisper server..."
+    mkdir -p "$HOME/.cache/magi/logs"
+    source "$SCRIPT_DIR/ears_pyenv/bin/activate"
+    python "$SCRIPT_DIR/server.py" > "$HOME/.cache/magi/logs/whisper_server.log" 2>&1 &
+    deactivate
+    
+    # Wait for server to start
+    for i in {1..30}; do
+        if curl -s http://localhost:5000/health >/dev/null 2>&1; then
+            echo "Whisper server started successfully"
+            break
+        fi
+        sleep 0.1
+    done
+fi
+
 # Ensure DBUS is running first
 if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
     eval $(dbus-launch --sh-syntax)

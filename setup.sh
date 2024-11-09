@@ -12,7 +12,7 @@ USERNAME=$(whoami)
 
 echo -e "${BLUE}Setting up MAGI Shell...${NC}"
 
-# Install dependencies
+# Install system dependencies
 DEPS=(
     python3-gi
     python3-gi-cairo
@@ -31,7 +31,15 @@ DEPS=(
     mate-polkit
     dbus-x11
     at-spi2-core
-    xrandr
+    python3-venv
+    python3-pip
+    python3-dev
+    xdotool
+    espeak
+    libgirepository1.0-dev
+    pkg-config
+    libportaudio2
+    portaudio19-dev
 )
 
 echo -e "${BLUE}Checking dependencies...${NC}"
@@ -56,6 +64,39 @@ else
     echo -e "${GREEN}All dependencies are installed${NC}"
 fi
 
+# Create Python virtual environment for the Whisper server
+echo -e "${BLUE}Creating Python virtual environment for Whisper server...${NC}"
+VENV_DIR="$SCRIPT_DIR/ears_pyenv"
+
+if [ ! -d "$VENV_DIR" ]; then
+    python3 -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    # Install server dependencies
+    echo -e "${BLUE}Installing Python packages...${NC}"
+    pip install --upgrade pip
+    
+    # Install CUDA support
+    echo -e "${BLUE}Installing CUDA support via pip...${NC}"
+    pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
+    
+    # Install other dependencies
+    pip install transformers
+    pip install flask
+    pip install numpy
+    pip install sounddevice
+    pip install requests
+    pip install nvidia-ml-py
+    pip install psutil
+    pip install accelerate>=0.26.0
+    
+    deactivate
+    
+    echo -e "${GREEN}Virtual environment created and dependencies installed${NC}"
+else
+    echo -e "${BLUE}Virtual environment already exists${NC}"
+fi
+
 # Make scripts executable
 chmod +x "$SCRIPT_DIR/magi_shell.py"
 chmod +x "$SCRIPT_DIR/start.sh"
@@ -74,11 +115,47 @@ cat > ~/.config/magi/config.json << EOL
     "enable_ai": true,
     "terminal": "mate-terminal",
     "launcher": "mate-panel --run-dialog",
-    "background": "feh --bg-fill /usr/share/magi/backgrounds/default.png"
+    "background": "/usr/share/magi/backgrounds/default.png",
+    "ollama_model": "mistral",
+    "whisper_endpoint": "http://localhost:5000/transcribe",
+    "sample_rate": 16000
 }
 EOL
 
-# Create desktop entry in system-wide location
+# Create start script for Whisper server
+cat > "$SCRIPT_DIR/start_whisper_server.sh" << 'EOL'
+#!/bin/bash
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source "$SCRIPT_DIR/ears_pyenv/bin/activate"
+python "$SCRIPT_DIR/server.py"
+EOL
+
+chmod +x "$SCRIPT_DIR/start_whisper_server.sh"
+
+# Create systemd service file for Whisper server
+sudo tee /etc/systemd/system/magi-whisper.service << EOL
+[Unit]
+Description=MAGI Whisper Speech Recognition Server
+After=network.target
+
+[Service]
+Type=simple
+User=$USERNAME
+ExecStart=$SCRIPT_DIR/start_whisper_server.sh
+WorkingDirectory=$SCRIPT_DIR
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOL
+
+# Enable and start the service
+sudo systemctl daemon-reload
+sudo systemctl enable magi-whisper.service
+sudo systemctl start magi-whisper.service
+
+# Create desktop entry
 sudo mkdir -p /usr/share/xsessions
 sudo tee /usr/share/xsessions/magi.desktop << EOL
 [Desktop Entry]
@@ -133,6 +210,7 @@ echo -e "Project location: ${NC}$SCRIPT_DIR"
 echo -e "Configuration: ${NC}~/.config/magi/config.json"
 echo -e "Session entry: ${NC}/usr/share/xsessions/magi.desktop"
 echo -e "Application entry: ${NC}~/.local/share/applications/magi.desktop"
+echo -e "Whisper server: ${NC}systemctl status magi-whisper.service"
 
 # Print usage instructions
 echo -e "\n${BLUE}Usage instructions:${NC}"

@@ -51,7 +51,7 @@ def load_config():
             "launcher": "mate-panel --run-dialog",
             "background": "/usr/share/magi/backgrounds/default.png",
             "ollama_model": "mistral",
-            "whisper_endpoint": "http://localhost:9000/asr",
+            "whisper_endpoint": "http://localhost:5000/transcribe",
             "sample_rate": 16000
         }
         try:
@@ -178,139 +178,81 @@ def create_tts_button():
     return button
 
 def create_voice_input():
-    """Create voice input button"""
+    """Create voice input button that sends to Whisper server"""
     button = Gtk.Button(label="🎤")
+    recording_style = None  # Store style context for recording indicator
     
     def on_press(*args):
         global recording, audio_data
         recording = True
         audio_data = []
         
+        # Change button appearance to indicate recording
+        button.get_style_context().add_class('recording')
+        button.set_label("🔴")  # Red circle to indicate recording
+        
         def audio_callback(indata, frames, time, status):
             if recording:
                 audio_data.append(indata.copy())
         
         # Start recording
-        stream = sd.InputStream(callback=audio_callback,
-                              channels=1,
-                              samplerate=config['sample_rate'])
-        stream.start()
+        try:
+            stream = sd.InputStream(callback=audio_callback,
+                                  channels=1,
+                                  samplerate=16000)
+            stream.start()
+        except Exception as e:
+            print(f"Recording Error: {e}")
+            recording = False
+            button.get_style_context().remove_class('recording')
+            button.set_label("🎤")
     
     def on_release(*args):
         global recording
         recording = False
+        button.get_style_context().remove_class('recording')
+        button.set_label("🎤")
         
         if audio_data:
             # Combine audio chunks
             audio = np.concatenate(audio_data)
             
-            # Send to whisper service
-            try:
-                files = {'audio': ('audio.wav', audio.tobytes())}
-                response = requests.post(config['whisper_endpoint'], files=files)
-                if response.ok:
-                    print(f"Transcribed: {response.json().get('text', '')}")
-            except Exception as e:
-                print(f"Whisper Error: {e}")
+            def transcribe():
+                try:
+                    # Send to local Whisper server
+                    files = {'audio': ('audio.wav', audio.tobytes())}
+                    response = requests.post('http://localhost:5000/transcribe', files=files)
+                    if response.ok:
+                        text = response.json().get('transcription', '')
+                        # Type the text using xdotool
+                        subprocess.run(['xdotool', 'type', text], check=True)
+                    else:
+                        print(f"Server Error: {response.status_code}")
+                except Exception as e:
+                    print(f"Transcription Error: {e}")
+            
+            # Run transcription in a separate thread to avoid blocking GUI
+            threading.Thread(target=transcribe, daemon=True).start()
     
     button.connect('pressed', on_press)
     button.connect('released', on_release)
+    
+    # Add CSS for recording indicator
+    css = b"""
+    .recording {
+        background-color: #ff4444;
+        color: white;
+    }
+    """
+    style_provider = Gtk.CssProvider()
+    style_provider.load_from_data(css)
+    Gtk.StyleContext.add_provider_for_screen(
+        Gdk.Screen.get_default(),
+        style_provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+    
     return button
-
-def create_panel(position='top'):
-    """Create a basic panel window"""
-    window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
-    window.set_type_hint(Gdk.WindowTypeHint.DOCK)
-    
-    def update_panel_geometry(*args):
-        screen = window.get_screen()
-        primary_monitor = screen.get_primary_monitor()
-        geometry = screen.get_monitor_geometry(primary_monitor)
-        
-        width = geometry.width
-        height = config['panel_height']
-        x_offset = geometry.x
-        y_offset = geometry.y
-        
-        if position == 'top':
-            window.move(x_offset, y_offset)
-        else:
-            window.move(x_offset, y_offset + geometry.height - height)
-        
-        window.set_size_request(width, height)
-    
-    update_panel_geometry()
-    window.set_decorated(False)
-    window.stick()
-    window.set_keep_above(True)
-    
-    screen = window.get_screen()
-    visual = screen.get_rgba_visual()
-    if visual and screen.is_composited():
-        window.set_visual(visual)
-        window.set_app_paintable(True)
-    
-    window.connect('draw', draw_panel_background)
-    screen.connect('monitors-changed', update_panel_geometry)
-    screen.connect('size-changed', update_panel_geometry)
-    
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-    window.add(box)
-    
-    return window, box
-
-def setup_panels():
-    """Initialize panel layout"""
-    global panels
-    
-    # Create top panel
-    top_panel, top_box = create_panel('top')
-    
-    # Add launcher button
-    launcher = create_launcher_button()
-    top_box.pack_start(launcher, False, False, 0)
-    
-    # Add workspace switcher to top
-    workspace_switcher = create_workspace_switcher()
-    top_box.pack_start(workspace_switcher, False, False, 2)
-    
-    # Add window list
-    window_list = create_window_list()
-    top_box.pack_start(window_list, True, True, 0)
-    
-    # Add system monitor
-    sys_monitor = create_system_monitor()
-    top_box.pack_end(sys_monitor, False, False, 2)
-    
-    # Add network button
-    network_btn = create_network_button()
-    top_box.pack_end(network_btn, False, False, 2)
-    
-    # Add clock
-    clock = create_clock()
-    top_box.pack_end(clock, False, False, 5)
-    
-    # Create bottom panel
-    bottom_panel, bottom_box = create_panel('bottom')
-    
-    # Add LLM interface
-    llm_interface = create_llm_interface()
-    bottom_box.pack_start(llm_interface, True, True, 2)
-    
-    # Add TTS button
-    tts_button = create_tts_button()
-    bottom_box.pack_end(tts_button, False, False, 2)
-    
-    # Add voice input button
-    voice_button = create_voice_input()
-    bottom_box.pack_end(voice_button, False, False, 2)
-    
-    # Show panels
-    top_panel.show_all()
-    bottom_panel.show_all()
-    
-    panels = {'top': top_panel, 'bottom': bottom_panel}
-    return panels
 
 def create_launcher_button():
     """Create the main menu button"""
@@ -384,12 +326,107 @@ def create_window_list():
     GLib.idle_add(update_window_list)
     return box
 
+def create_panel(position='top'):
+    """Create a basic panel window"""
+    window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+    window.set_type_hint(Gdk.WindowTypeHint.DOCK)
+    
+    def update_panel_geometry(*args):
+        screen = window.get_screen()
+        primary_monitor = screen.get_primary_monitor()
+        geometry = screen.get_monitor_geometry(primary_monitor)
+        
+        width = geometry.width
+        height = config['panel_height']
+        x_offset = geometry.x
+        y_offset = geometry.y
+        
+        if position == 'top':
+            window.move(x_offset, y_offset)
+        else:
+            window.move(x_offset, y_offset + geometry.height - height)
+        
+        window.set_size_request(width, height)
+    
+    update_panel_geometry()
+    window.set_decorated(False)
+    window.stick()
+    window.set_keep_above(True)
+    
+    screen = window.get_screen()
+    visual = screen.get_rgba_visual()
+    if visual and screen.is_composited():
+        window.set_visual(visual)
+        window.set_app_paintable(True)
+    
+    window.connect('draw', draw_panel_background)
+    screen.connect('monitors-changed', update_panel_geometry)
+    screen.connect('size-changed', update_panel_geometry)
+    
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+    window.add(box)
+    
+    return window, box
+
 def draw_panel_background(widget, ctx):
     """Draw semi-transparent panel background"""
     ctx.set_source_rgba(0.2, 0.2, 0.2, 0.85)
     ctx.set_operator(cairo.OPERATOR_SOURCE)
     ctx.paint()
     return False
+
+def setup_panels():
+    """Initialize panel layout"""
+    global panels
+    
+    # Create top panel
+    top_panel, top_box = create_panel('top')
+    
+    # Add launcher button
+    launcher = create_launcher_button()
+    top_box.pack_start(launcher, False, False, 0)
+    
+    # Add workspace switcher to top
+    workspace_switcher = create_workspace_switcher()
+    top_box.pack_start(workspace_switcher, False, False, 2)
+    
+    # Add window list
+    window_list = create_window_list()
+    top_box.pack_start(window_list, True, True, 0)
+    
+    # Add system monitor
+    sys_monitor = create_system_monitor()
+    top_box.pack_end(sys_monitor, False, False, 2)
+    
+    # Add network button
+    network_btn = create_network_button()
+    top_box.pack_end(network_btn, False, False, 2)
+    
+    # Add clock
+    clock = create_clock()
+    top_box.pack_end(clock, False, False, 5)
+    
+    # Create bottom panel
+    bottom_panel, bottom_box = create_panel('bottom')
+    
+    # Add LLM interface
+    llm_interface = create_llm_interface()
+    bottom_box.pack_start(llm_interface, True, True, 2)
+    
+    # Add TTS button
+    tts_button = create_tts_button()
+    bottom_box.pack_end(tts_button, False, False, 2)
+    
+    # Add voice input button
+    voice_button = create_voice_input()
+    bottom_box.pack_end(voice_button, False, False, 2)
+    
+    # Show panels
+    top_panel.show_all()
+    bottom_panel.show_all()
+    
+    panels = {'top': top_panel, 'bottom': bottom_panel}
+    return panels
 
 def setup_styles():
     """Set up CSS styles"""
