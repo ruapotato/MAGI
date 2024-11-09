@@ -62,14 +62,18 @@ def load_config():
             print(f"Warning: Could not save config: {e}")
 
 def create_system_monitor():
-    """Create system monitor widget"""
+    """Create system monitor widget with fixed-width labels"""
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
     
-    # CPU and RAM labels
+    # CPU and RAM labels with monospace font and fixed width
     cpu_label = Gtk.Label()
     ram_label = Gtk.Label()
     gpu_label = Gtk.Label()
     vram_label = Gtk.Label()
+    
+    # Set monospace font and fixed width for all labels
+    for label in [cpu_label, ram_label, gpu_label, vram_label]:
+        label.get_style_context().add_class('monitor-label')
     
     box.pack_start(cpu_label, False, False, 2)
     box.pack_start(ram_label, False, False, 2)
@@ -92,10 +96,11 @@ def create_system_monitor():
             gpu_percent = 0
             vram_percent = 0
         
-        cpu_label.set_text(f"CPU: {cpu_percent:.1f}%")
-        ram_label.set_text(f"RAM: {ram_percent:.1f}%")
-        gpu_label.set_text(f"GPU: {gpu_percent:.1f}%")
-        vram_label.set_text(f"VRAM: {vram_percent:.1f}%")
+        # Format with fixed width
+        cpu_label.set_text(f"CPU: {cpu_percent:>5.1f}%")
+        ram_label.set_text(f"RAM: {ram_percent:>5.1f}%")
+        gpu_label.set_text(f"GPU: {gpu_percent:>5.1f}%")
+        vram_label.set_text(f"VRAM: {vram_percent:>5.1f}%")
         return True
     
     # Initialize NVIDIA Management Library
@@ -115,10 +120,12 @@ def create_network_button():
     return button
 
 def create_clock():
-    """Create a clock widget"""
+    """Create a clock widget with fixed width"""
     label = Gtk.Label()
+    label.get_style_context().add_class('clock-label')
     
     def update_clock():
+        # Use monospace font and fixed width format
         label.set_text(time.strftime("%Y-%m-%d %H:%M:%S"))
         return True
     
@@ -401,19 +408,43 @@ def create_window_list():
     screen.force_update()
     
     def update_window_list(*args):
+        # Clear existing buttons
         for child in box.get_children():
             box.remove(child)
         
-        for window in screen.get_windows():
-            if not window.is_skip_tasklist():
-                button = Gtk.Button(label=window.get_name()[:30])
-                button.connect('clicked', lambda w, win=window: win.activate(GLib.get_current_time()))
-                box.pack_start(button, False, False, 0)
+        # Get current workspace
+        current_workspace = screen.get_active_workspace()
+        
+        # Get all windows on current workspace
+        windows = [win for win in screen.get_windows() 
+                  if not win.is_skip_tasklist() and 
+                  (win.get_workspace() == current_workspace or win.is_pinned())]
+        
+        # Calculate max width based on number of windows
+        max_chars = max(10, min(30, int(80 / max(1, len(windows)))))
+        
+        for window in windows:
+            # Truncate window title
+            title = window.get_name()
+            if len(title) > max_chars:
+                title = title[:max_chars-3] + "..."
+            
+            button = Gtk.Button(label=title)
+            
+            # Add active class if window is active
+            if window.is_active():
+                button.get_style_context().add_class('active-window')
+            
+            button.connect('clicked', lambda w, win=window: win.activate(GLib.get_current_time()))
+            box.pack_start(button, False, False, 0)
+        
         box.show_all()
     
     screen.connect('window-opened', update_window_list)
     screen.connect('window-closed', update_window_list)
     screen.connect('window-stacking-changed', update_window_list)
+    screen.connect('active-window-changed', update_window_list)
+    screen.connect('active-workspace-changed', update_window_list)
     
     GLib.idle_add(update_window_list)
     return box
@@ -502,9 +533,13 @@ def setup_panels():
     # Create bottom panel
     bottom_panel, bottom_box = create_panel('bottom')
     
-    # Add LLM interface button
+    # Create a container for centered content
+    center_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+    bottom_box.pack_start(center_box, True, True, 0)
+    
+    # Add LLM interface button centered
     llm_button = create_llm_interface_button()
-    bottom_box.pack_start(llm_button, False, False, 2)
+    center_box.set_center_widget(llm_button)
     
     # Add TTS button
     tts_button = create_tts_button()
@@ -548,6 +583,12 @@ def setup_styles():
         border-radius: 8px;
     }
     
+    .active-window {
+        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
+        color: #1a1b26;
+        border: none;
+    }
+    
     button {
         background: #292e42;
         color: #c0caf5;
@@ -569,6 +610,18 @@ def setup_styles():
         color: #c0caf5;
     }
     
+    .monitor-label {
+        font-family: monospace;
+        padding: 0 4px;
+        min-width: 100px;
+    }
+    
+    .clock-label {
+        font-family: monospace;
+        padding: 0 4px;
+        min-width: 180px;
+    }
+    
     .recording {
         background-color: #f7768e;
         border: 2px solid #ff99a3;
@@ -582,7 +635,6 @@ def setup_styles():
         style_provider,
         Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
-
 
 def main():
     # Check X11 first
