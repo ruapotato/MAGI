@@ -576,19 +576,24 @@ def setup_css():
     }
     
     .toolbar-button {
-        background: #292e42;
-        border: 1px solid #3b4261;
+        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
+        color: #1a1b26;
+        border: none;
+        border-radius: 12px;
         padding: 6px 12px;
     }
     
     .toolbar-button:hover {
-        background: #343b58;
-        border-color: #7aa2f7;
+        background: linear-gradient(135deg, #88b0ff, #33d1ed);
+    }
+    
+    .toolbar-button:active {
+        background: linear-gradient(135deg, #6992e3, #29b2cc);
     }
     
     .recording {
         background-color: #f7768e;
-        border-color: #ff99a3;
+        border: 2px solid #ff99a3;
     }
     """
     style_provider = Gtk.CssProvider()

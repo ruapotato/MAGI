@@ -462,8 +462,8 @@ def create_panel(position='top'):
     return window, box
 
 def draw_panel_background(widget, ctx):
-    """Draw semi-transparent panel background"""
-    ctx.set_source_rgba(0.2, 0.2, 0.2, 0.85)
+    """Draw panel background with Tokyo Night colors"""
+    ctx.set_source_rgba(0.10, 0.11, 0.15, 0.95)  # #1a1b26 with 0.95 alpha
     ctx.set_operator(cairo.OPERATOR_SOURCE)
     ctx.paint()
     return False
@@ -525,15 +525,53 @@ def setup_styles():
     """Set up CSS styles"""
     css = b"""
     .launcher-button {
-        background-color: #215d9c;
-        color: white;
+        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
+        color: #1a1b26;
+        border: none;
+        border-radius: 12px;
         padding: 0 10px;
+        font-weight: 600;
     }
+    
     .launcher-button:hover {
-        background-color: #2c7bd3;
+        background: linear-gradient(135deg, #88b0ff, #33d1ed);
     }
+    
+    .launcher-button:active {
+        background: linear-gradient(135deg, #6992e3, #29b2cc);
+    }
+    
     .active-workspace {
-        background-color: #215d9c;
+        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
+        color: #1a1b26;
+        border: none;
+        border-radius: 8px;
+    }
+    
+    button {
+        background: #292e42;
+        color: #c0caf5;
+        border: 1px solid #3b4261;
+        border-radius: 8px;
+        padding: 2px 8px;
+    }
+    
+    button:hover {
+        background: #343b58;
+        border-color: #7aa2f7;
+    }
+    
+    button:active {
+        background: #1a1b26;
+    }
+    
+    label {
+        color: #c0caf5;
+    }
+    
+    .recording {
+        background-color: #f7768e;
+        border: 2px solid #ff99a3;
         color: white;
     }
     """
@@ -544,6 +582,7 @@ def setup_styles():
         style_provider,
         Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
+
 
 def main():
     # Check X11 first
