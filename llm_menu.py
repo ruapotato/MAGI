@@ -120,7 +120,9 @@ class MainWindow(Gtk.Window):
         msg_box = MessageBox(text, is_user, self)
         self.messages_box.pack_start(msg_box, False, False, 0)
         self.scroll_to_bottom()
-        self.save_history()
+        # Only save history for user messages
+        if is_user:
+            self.save_history()
     
     def on_send(self, widget):
         text = self.entry.get_text().strip()
@@ -149,16 +151,12 @@ class MainWindow(Gtk.Window):
                 conversation += "Previous conversation:\n" + "\n".join(history) + "\n\n"
             conversation += f"user: {prompt}"
             
-            # Create response message box immediately
-            response_box = None
+            # Create initial message box for live output
+            live_box = MessageBox("...", False, self)
+            self.messages_box.pack_start(live_box, False, False, 0)
+            self.scroll_to_bottom()
             
-            def create_response_box():
-                nonlocal response_box
-                response_box = MessageBox("...", False, self)
-                self.messages_box.pack_start(response_box, False, False, 0)
-                self.scroll_to_bottom()
-            
-            GLib.idle_add(create_response_box)
+            full_response = ""
             
             response = requests.post('http://localhost:11434/api/generate',
                                    json={'model': 'mistral',
@@ -166,41 +164,48 @@ class MainWindow(Gtk.Window):
                                    stream=True)
             
             if response.ok:
-                current_response = []
-                
                 for line in response.iter_lines():
                     if line:
                         try:
                             chunk = json.loads(line)
                             if 'response' in chunk:
-                                current_response.append(chunk['response'])
-                                # Update text with accumulated response
-                                text = ''.join(current_response)
+                                text = chunk['response']
+                                full_response += text
                                 
-                                def update_text():
-                                    if response_box and response_box.label:
-                                        response_box.label.set_text(text)
-                                        self.scroll_to_bottom()
-                                
-                                GLib.idle_add(update_text)
-                                
+                                def update():
+                                    live_box.label.set_text(full_response)
+                                    self.scroll_to_bottom()
+                                GLib.idle_add(update)
+                                        
                         except json.JSONDecodeError:
                             continue
-            else:
-                def show_error():
-                    if response_box and response_box.label:
-                        response_box.label.set_text(f"Error: HTTP {response.status_code}")
-                        self.scroll_to_bottom()
                 
-                GLib.idle_add(show_error)
+                # Now that we have the full response, remove the live box and split into parts
+                def split_and_create_boxes():
+                    # Remove the live box
+                    self.messages_box.remove(live_box)
+                    
+                    # Split on code blocks and create new boxes
+                    is_code = False
+                    parts = full_response.split('```')
+                    
+                    for part in parts:
+                        if part.strip():  # Only create boxes for non-empty parts
+                            msg_box = MessageBox(part.strip(), False, self, is_code)
+                            self.messages_box.pack_start(msg_box, False, False, 0)
+                            is_code = not is_code
+                    
+                    self.scroll_to_bottom()
+                    # Save history after all boxes are created
+                    self.save_history()
+                
+                GLib.idle_add(split_and_create_boxes)
+            
+            else:
+                GLib.idle_add(lambda: self.add_message(f"Error: HTTP {response.status_code}", False))
                 
         except Exception as e:
-            def show_exception():
-                if response_box and response_box.label:
-                    response_box.label.set_text(f"Error: {str(e)}")
-                    self.scroll_to_bottom()
-            
-            GLib.idle_add(show_exception)
+            GLib.idle_add(lambda: self.add_message(f"Error: {str(e)}", False))
     
     def load_context(self):
         try:
@@ -214,8 +219,14 @@ class MainWindow(Gtk.Window):
             with open('/tmp/MAGI/chat_history.json', 'r') as f:
                 history = json.load(f)
                 for msg in history:
-                    self.add_message(msg['text'], msg['is_user'])
-                # Final scroll after all messages are loaded
+                    msg_box = MessageBox(
+                        msg['text'],
+                        msg['is_user'],
+                        self,
+                        msg.get('is_code', False)  # Default to False for backwards compatibility
+                    )
+                    self.messages_box.pack_start(msg_box, False, False, 0)
+                
                 self.scroll_to_bottom()
         except FileNotFoundError:
             pass
@@ -226,7 +237,8 @@ class MainWindow(Gtk.Window):
             if isinstance(child, MessageBox):
                 history.append({
                     'text': child.label.get_text(),
-                    'is_user': child.is_user
+                    'is_user': child.is_user,
+                    'is_code': child.is_code
                 })
         
         os.makedirs('/tmp/MAGI', exist_ok=True)
@@ -325,10 +337,11 @@ class MainWindow(Gtk.Window):
                 print("DEBUG: No audio data collected")
 
 class MessageBox(Gtk.Box):
-    def __init__(self, text, is_user=True, parent_window=None):
+    def __init__(self, text, is_user=True, parent_window=None, is_code=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.parent_window = parent_window
         self.is_user = is_user
+        self.is_code = is_code
         
         # Message container
         msg_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -340,10 +353,23 @@ class MessageBox(Gtk.Box):
         
         # Text label
         self.label = Gtk.Label(label=text)
-        self.label.set_line_wrap(True)
-        self.label.set_max_width_chars(60)
+        self.label.set_line_wrap(False if is_code else True)  # Don't wrap code
+        self.label.set_max_width_chars(80 if is_code else 60)  # Wider for code
         self.label.set_xalign(0)
-        self.label.get_style_context().add_class('user-message' if is_user else 'assistant-message')
+        self.label.set_yalign(0)
+        self.label.set_selectable(True)  # Make text selectable
+        
+        if is_code:
+            self.label.set_justify(Gtk.Justification.LEFT)
+            # Preserve indentation and line breaks
+            self.label.set_markup("<tt>" + GLib.markup_escape_text(text) + "</tt>")
+        
+        # Apply appropriate style class
+        if is_code:
+            self.label.get_style_context().add_class('code-block')
+        else:
+            self.label.get_style_context().add_class('user-message' if is_user else 'assistant-message')
+        
         content_box.pack_start(self.label, True, True, 0)
         
         # Button container
@@ -355,49 +381,84 @@ class MessageBox(Gtk.Box):
         content_box.pack_start(button_box, False, False, 0)
         
         # Add buttons based on message type
-        if is_user:
+        if is_code:
+            # Copy button for code blocks
+            copy_btn = Gtk.Button.new_from_icon_name("edit-copy-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+            copy_btn.get_style_context().add_class('message-button')
+            copy_btn.connect('clicked', self.on_copy_clicked)
+            button_box.pack_start(copy_btn, False, False, 0)
+            
+            # Run button for code blocks (if it looks like a command)
+            if not text.strip().startswith(('import ', 'def ', 'class ')):
+                run_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+                run_btn.get_style_context().add_class('message-button')
+                run_btn.connect('clicked', self.on_run_clicked)
+                button_box.pack_start(run_btn, False, False, 0)
+        elif is_user:
             edit_btn = Gtk.Button.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
             edit_btn.get_style_context().add_class('message-button')
             edit_btn.connect('clicked', self.on_edit_clicked)
             button_box.pack_start(edit_btn, False, False, 0)
         else:
-            # Read button
+            # Read button for regular assistant messages
             read_btn = Gtk.Button.new_from_icon_name("audio-speakers-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
             read_btn.get_style_context().add_class('message-button')
             read_btn.connect('clicked', self.on_read_clicked)
             button_box.pack_start(read_btn, False, False, 0)
             
-            # Copy button
+            # Copy button for assistant messages
             copy_btn = Gtk.Button.new_from_icon_name("edit-copy-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
             copy_btn.get_style_context().add_class('message-button')
             copy_btn.connect('clicked', self.on_copy_clicked)
             button_box.pack_start(copy_btn, False, False, 0)
         
-        # Delete button for both types
-        delete_btn = Gtk.Button.new_from_icon_name("edit-delete-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
-        delete_btn.get_style_context().add_class('message-button')
-        delete_btn.connect('clicked', self.on_delete_clicked)
-        button_box.pack_start(delete_btn, False, False, 0)
+        # Delete button for all types
+        if not is_code:  # Don't show delete button on code blocks
+            delete_btn = Gtk.Button.new_from_icon_name("edit-delete-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+            delete_btn.get_style_context().add_class('message-button')
+            delete_btn.connect('clicked', self.on_delete_clicked)
+            button_box.pack_start(delete_btn, False, False, 0)
         
         self.show_all()
     
     def on_edit_clicked(self, button):
+        """Edit the message text"""
         text = self.label.get_text()
         self.parent_window.entry.set_text(text)
         self.parent_window.entry.grab_focus()
     
     def on_read_clicked(self, button):
+        """Read the message text using espeak"""
         text = self.label.get_text()
         subprocess.Popen(['espeak', text])
     
     def on_copy_clicked(self, button):
+        """Copy message text to clipboard"""
         text = self.label.get_text()
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         clipboard.set_text(text, -1)
     
     def on_delete_clicked(self, button):
+        """Delete this message"""
         self.get_parent().remove(self)
         self.parent_window.save_history()
+    
+    def on_run_clicked(self, button):
+        """Execute the code block as a shell command"""
+        command = self.label.get_text().strip()
+        try:
+            subprocess.Popen(command, shell=True)
+        except Exception as e:
+            dialog = Gtk.MessageDialog(
+                transient_for=self.get_toplevel(),
+                flags=0,
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.OK,
+                text="Error running command"
+            )
+            dialog.format_secondary_text(str(e))
+            dialog.run()
+            dialog.destroy()
 
 def setup_css():
     css = b"""
@@ -450,6 +511,17 @@ def setup_css():
     .assistant-message:hover {
         margin-top: 2px;
         margin-bottom: 6px;
+    }
+    
+    .code-block {
+        background-color: #000000;
+        color: #ffffff;
+        padding: 16px 20px;
+        border-radius: 12px;
+        margin: 4px 0px 4px 200px;
+        font-size: 15px;
+        font-weight: 400;
+        font-family: monospace;
     }
     
     entry {
@@ -526,6 +598,51 @@ def setup_css():
         style_provider,
         Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
+
+def parse_message_with_code(text):
+    """Split a message into regular text and code blocks"""
+    parts = []
+    current_text = []
+    code_block = False
+    code_language = None
+    
+    lines = text.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith('```'):
+            if code_block:  # End of code block
+                if current_text:
+                    parts.append(('code', '\n'.join(current_text)))
+                    current_text = []
+                code_block = False
+                code_language = None
+            else:  # Start of code block
+                if current_text:
+                    parts.append(('text', '\n'.join(current_text)))
+                    current_text = []
+                code_block = True
+                # Check for language specification
+                code_language = line[3:].strip()
+            i += 1
+        else:
+            current_text.append(line)
+            i += 1
+    
+    # Add any remaining text
+    if current_text:
+        parts.append(('code' if code_block else 'text', '\n'.join(current_text)))
+    
+    # Clean up the parts
+    cleaned_parts = []
+    for part_type, content in parts:
+        # Remove any leading/trailing empty lines
+        content = content.strip('\n')
+        if content:  # Only add if there's actual content
+            cleaned_parts.append((part_type, content))
+    
+    return cleaned_parts
+
 
 def position_window(window):
     """Position window at the bottom of the primary monitor"""
