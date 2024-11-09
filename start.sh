@@ -167,7 +167,7 @@ if [ -f "/usr/share/magi/backgrounds/default.png" ]; then
 fi
 
 # Start MAGI shell
-exec python3 "$SCRIPT_DIR/magi_shell.py" &
+exec python3 "$SCRIPT_DIR/magi_shell.py" &> $HOME/.cache/magi/logs/magi_shell.log &
 # Bug workaround:
 sleep 3
 mate-settings-daemon --replace

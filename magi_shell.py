@@ -180,59 +180,93 @@ def create_tts_button():
 def create_voice_input():
     """Create voice input button that sends to Whisper server"""
     button = Gtk.Button(label="🎤")
-    recording_style = None  # Store style context for recording indicator
+    stream = None
     
-    def on_press(*args):
-        global recording, audio_data
-        recording = True
-        audio_data = []
-        
-        # Change button appearance to indicate recording
-        button.get_style_context().add_class('recording')
-        button.set_label("🔴")  # Red circle to indicate recording
+    def start_recording():
+        nonlocal stream
+        audio_data.clear()
         
         def audio_callback(indata, frames, time, status):
             if recording:
                 audio_data.append(indata.copy())
         
-        # Start recording
+        stream = sd.InputStream(
+            callback=audio_callback,
+            channels=1,
+            samplerate=16000,
+            blocksize=1024,
+            dtype=np.float32
+        )
+        stream.start()
+    
+    def stop_recording():
+        nonlocal stream
+        if stream is not None:
+            stream.stop()
+            stream.close()
+            stream = None
+    
+    def on_press(*args):
+        global recording
+        print("DEBUG: Starting recording")
         try:
-            stream = sd.InputStream(callback=audio_callback,
-                                  channels=1,
-                                  samplerate=16000)
-            stream.start()
+            recording = True
+            start_recording()
+            GLib.idle_add(lambda: button.get_style_context().add_class('recording'))
+            GLib.idle_add(lambda: button.set_label("🔴"))
+            print("DEBUG: Recording stream started")
         except Exception as e:
             print(f"Recording Error: {e}")
             recording = False
-            button.get_style_context().remove_class('recording')
-            button.set_label("🎤")
+            GLib.idle_add(lambda: button.get_style_context().remove_class('recording'))
+            GLib.idle_add(lambda: button.set_label("🎤"))
     
     def on_release(*args):
         global recording
-        recording = False
-        button.get_style_context().remove_class('recording')
-        button.set_label("🎤")
-        
-        if audio_data:
-            # Combine audio chunks
-            audio = np.concatenate(audio_data)
+        print("DEBUG: Stopping recording")
+        try:
+            recording = False
+            stop_recording()
+            GLib.idle_add(lambda: button.get_style_context().remove_class('recording'))
+            GLib.idle_add(lambda: button.set_label("🎤"))
             
-            def transcribe():
-                try:
-                    # Send to local Whisper server
-                    files = {'audio': ('audio.wav', audio.tobytes())}
-                    response = requests.post('http://localhost:5000/transcribe', files=files)
-                    if response.ok:
-                        text = response.json().get('transcription', '')
-                        # Type the text using xdotool
-                        subprocess.run(['xdotool', 'type', text], check=True)
-                    else:
-                        print(f"Server Error: {response.status_code}")
-                except Exception as e:
-                    print(f"Transcription Error: {e}")
-            
-            # Run transcription in a separate thread to avoid blocking GUI
-            threading.Thread(target=transcribe, daemon=True).start()
+            if audio_data:
+                print(f"DEBUG: Got {len(audio_data)} chunks of audio data")
+                audio = np.concatenate(audio_data)
+                print(f"DEBUG: Concatenated audio shape: {audio.shape}")
+                
+                def transcribe():
+                    try:
+                        print("DEBUG: Starting transcription request")
+                        files = {'audio': ('audio.wav', audio.tobytes())}
+                        response = requests.post('http://localhost:5000/transcribe', files=files)
+                        print(f"DEBUG: Got response status {response.status_code}")
+                        
+                        if response.ok:
+                            text = response.json().get('transcription', '')
+                            print(f"DEBUG: Got transcription: {text}")
+                            subprocess.run(['xdotool', 'type', text], check=True)
+                            print("DEBUG: Typed transcription")
+                        else:
+                            print(f"Server Error: {response.status_code}")
+                    except Exception as e:
+                        print(f"Transcription Error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
+                # Run transcription in a separate thread
+                threading.Thread(target=transcribe, daemon=True).start()
+            else:
+                print("DEBUG: No audio data collected")
+                
+        except Exception as e:
+            print(f"Audio Processing Error: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            recording = False
+            GLib.idle_add(lambda: button.get_style_context().remove_class('recording'))
+            GLib.idle_add(lambda: button.set_label("🎤"))
     
     button.connect('pressed', on_press)
     button.connect('released', on_release)
