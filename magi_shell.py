@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+
+import struct
+import array
 import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Wnck', '3.0')
@@ -458,15 +461,84 @@ def create_window_list():
     return box
 
 def create_panel(position='top'):
-    """Create a basic panel window"""
-    window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+    """Create a panel window with struts and Tokyo Night theme"""
+    window = Gtk.Window.new(Gtk.WindowType.TOPLEVEL)
     window.set_type_hint(Gdk.WindowTypeHint.DOCK)
-    window.set_accept_focus(False)  # Don't accept focus by default
     
-    def update_panel_geometry(*args):
-        screen = window.get_screen()
-        primary_monitor = screen.get_primary_monitor()
-        geometry = screen.get_monitor_geometry(primary_monitor)
+    # Basic window setup
+    window.set_decorated(False)
+    window.set_app_paintable(True)
+    window.set_accept_focus(False)
+    window.set_resizable(False)
+    window.stick()
+    window.set_keep_above(True)
+
+    def draw_panel_background(widget, ctx):
+        """Draw panel background with Tokyo Night colors"""
+        # Tokyo Night background color with transparency
+        ctx.set_source_rgba(0.10, 0.11, 0.15, 0.95)  # #1a1b26 with 0.95 alpha
+        ctx.set_operator(cairo.OPERATOR_SOURCE)
+        ctx.paint()
+        return False
+    
+    def set_struts():
+        """Set window struts using xprop"""
+        if not window.get_window():
+            return False
+            
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        geometry = monitor.get_geometry()
+        
+        width = geometry.width
+        height = config['panel_height']
+        x_offset = geometry.x
+        
+        # Add padding for top panel
+        if position == 'top':
+            strut_height = height + 15
+        else:
+            strut_height = height
+        
+        try:
+            xid = window.get_window().get_xid()
+            
+            # Set basic struts
+            if position == 'top':
+                subprocess.run(['xprop', '-id', str(xid), 
+                              '-f', '_NET_WM_STRUT', '32c',
+                              '-set', '_NET_WM_STRUT',
+                              f'0, 0, {strut_height}, 0'], check=True)
+                
+                partial_strut = f'0, 0, {strut_height}, 0, ' + \
+                              f'0, 0, 0, 0, ' + \
+                              f'{x_offset}, {x_offset + width}, 0, 0'
+            else:
+                subprocess.run(['xprop', '-id', str(xid),
+                              '-f', '_NET_WM_STRUT', '32c',
+                              '-set', '_NET_WM_STRUT',
+                              f'0, 0, 0, {strut_height}'], check=True)
+                
+                partial_strut = f'0, 0, 0, {strut_height}, ' + \
+                              f'0, 0, 0, 0, ' + \
+                              f'0, 0, {x_offset}, {x_offset + width}'
+            
+            # Set partial struts
+            subprocess.run(['xprop', '-id', str(xid),
+                          '-f', '_NET_WM_STRUT_PARTIAL', '32c',
+                          '-set', '_NET_WM_STRUT_PARTIAL',
+                          partial_strut], check=True)
+            
+        except Exception as e:
+            print(f"Error setting struts: {e}")
+            return False
+        return True
+
+    def update_geometry(*args):
+        """Update panel position and size"""
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        geometry = monitor.get_geometry()
         
         width = geometry.width
         height = config['panel_height']
@@ -479,26 +551,35 @@ def create_panel(position='top'):
             window.move(x_offset, y_offset + geometry.height - height)
         
         window.set_size_request(width, height)
-    
-    update_panel_geometry()
-    window.set_decorated(False)
-    window.stick()
-    window.set_keep_above(True)
-    
+        window.resize(width, height)
+        
+        # Set struts after geometry is updated
+        GLib.idle_add(set_struts)
+        return False
+
+    # Set up visual for transparency
     screen = window.get_screen()
     visual = screen.get_rgba_visual()
     if visual and screen.is_composited():
         window.set_visual(visual)
-        window.set_app_paintable(True)
     
-    window.connect('draw', draw_panel_background)
-    screen.connect('monitors-changed', update_panel_geometry)
-    screen.connect('size-changed', update_panel_geometry)
-    
+    # Create content box
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
     window.add(box)
     
+    # Connect signals
+    window.connect('draw', draw_panel_background)
+    window.connect('realize', lambda w: GLib.idle_add(update_geometry))
+    
+    # Show the panel
+    box.show_all()
+    window.show_all()
+    
+    # Initial geometry setup
+    GLib.idle_add(update_geometry)
+    
     return window, box
+
 
 def draw_panel_background(widget, ctx):
     """Draw panel background with Tokyo Night colors"""
@@ -600,13 +681,19 @@ def setup_styles():
     .monitor-label {
         font-family: monospace;
         padding: 0 4px;
-        min-width: 100px
+        min-width: 100px;
+        color: #c0caf5;
+        font-weight: 500;
+        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
     }
 
     .clock-label {
-        font-family: monospace;
-        padding: 0 4px;
-        min-width: 180px
+    font-family: monospace;
+    padding: 0 4px;
+    min-width: 180px;
+    color: #c0caf5;  /* Tokyo Night foreground color - a light blue-white */
+    font-weight: 500;  /* Medium weight for better visibility */
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);  /* Optional: adds a subtle shadow for better readability */
     }
 
     .recording {
