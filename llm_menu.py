@@ -102,6 +102,14 @@ class MainWindow(Gtk.Window):
         self.entry.connect('activate', self.on_send)
         send_button.connect('clicked', self.on_send)
     
+    def scroll_to_bottom(self):
+        """Ensure chat window is scrolled to the bottom"""
+        def _scroll():
+            scroll = self.messages_box.get_parent().get_parent()
+            adj = scroll.get_vadjustment()
+            adj.set_value(adj.get_upper() - adj.get_page_size())
+        GLib.idle_add(_scroll)
+
     def on_key_press(self, widget, event):
         if event.keyval == Gdk.KEY_Escape:
             widget.close()
@@ -111,13 +119,7 @@ class MainWindow(Gtk.Window):
     def add_message(self, text, is_user=True):
         msg_box = MessageBox(text, is_user, self)
         self.messages_box.pack_start(msg_box, False, False, 0)
-        
-        # Auto-scroll to bottom
-        viewport = msg_box.get_parent().get_parent()
-        adjustment = viewport.get_parent().get_vadjustment()
-        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
-        
-        # Save history
+        self.scroll_to_bottom()
         self.save_history()
     
     def on_send(self, widget):
@@ -147,25 +149,58 @@ class MainWindow(Gtk.Window):
                 conversation += "Previous conversation:\n" + "\n".join(history) + "\n\n"
             conversation += f"user: {prompt}"
             
+            # Create response message box immediately
+            response_box = None
+            
+            def create_response_box():
+                nonlocal response_box
+                response_box = MessageBox("...", False, self)
+                self.messages_box.pack_start(response_box, False, False, 0)
+                self.scroll_to_bottom()
+            
+            GLib.idle_add(create_response_box)
+            
             response = requests.post('http://localhost:11434/api/generate',
                                    json={'model': 'mistral',
                                         'prompt': conversation},
                                    stream=True)
+            
             if response.ok:
-                full_response = ""
+                current_response = []
+                
                 for line in response.iter_lines():
                     if line:
                         try:
                             chunk = json.loads(line)
                             if 'response' in chunk:
-                                full_response += chunk['response']
+                                current_response.append(chunk['response'])
+                                # Update text with accumulated response
+                                text = ''.join(current_response)
+                                
+                                def update_text():
+                                    if response_box and response_box.label:
+                                        response_box.label.set_text(text)
+                                        self.scroll_to_bottom()
+                                
+                                GLib.idle_add(update_text)
+                                
                         except json.JSONDecodeError:
                             continue
+            else:
+                def show_error():
+                    if response_box and response_box.label:
+                        response_box.label.set_text(f"Error: HTTP {response.status_code}")
+                        self.scroll_to_bottom()
                 
-                if full_response:
-                    GLib.idle_add(self.add_message, full_response, False)
+                GLib.idle_add(show_error)
+                
         except Exception as e:
-            GLib.idle_add(self.add_message, f"Error: {str(e)}", False)
+            def show_exception():
+                if response_box and response_box.label:
+                    response_box.label.set_text(f"Error: {str(e)}")
+                    self.scroll_to_bottom()
+            
+            GLib.idle_add(show_exception)
     
     def load_context(self):
         try:
@@ -180,14 +215,8 @@ class MainWindow(Gtk.Window):
                 history = json.load(f)
                 for msg in history:
                     self.add_message(msg['text'], msg['is_user'])
-                
-                # After loading all messages, ensure we're scrolled to bottom
-                def scroll_to_bottom():
-                    for child in self.messages_box.get_children():
-                        child.show()  # Ensure all children are shown
-                    adjustment = self.messages_box.get_parent().get_parent().get_parent().get_vadjustment()
-                    adjustment.set_value(adjustment.get_upper())
-                GLib.idle_add(scroll_to_bottom)
+                # Final scroll after all messages are loaded
+                self.scroll_to_bottom()
         except FileNotFoundError:
             pass
     
