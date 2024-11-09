@@ -126,39 +126,97 @@ def create_clock():
     GLib.timeout_add(1000, update_clock)
     return label
 
-def create_llm_interface():
-    """Create LLM interface using Ollama"""
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+def create_llm_interface_button():
+    """Create context-aware LLM button that launches menu"""
+    button = Gtk.Button()
+    button.set_relief(Gtk.ReliefStyle.NONE)
+    context_label = Gtk.Label("Ask anything...")
+    button.add(context_label)
     
-    entry = Gtk.Entry()
-    entry.set_placeholder_text("Ask anything...")
-    entry.set_size_request(300, -1)
+    # Keep track of the current window and selection state
+    current_state = {
+        'window_name': None,
+        'has_selection': False,
+        'last_selection': None
+    }
     
-    response_label = Gtk.Label()
-    response_label.set_line_wrap(True)
-    response_label.set_size_request(400, -1)
+    def handle_window_change(window_name):
+        """Handle window context changes"""
+        # Ignore the MAGI Assistant window
+        if window_name == "MAGI Assistant":
+            return
+            
+        current_state['window_name'] = window_name
+        current_state['has_selection'] = False
+        current_state['last_selection'] = None
+        context_label.set_text(f"Ask anything about {window_name}...")
+        
+        # Save window context
+        os.makedirs('/tmp/MAGI', exist_ok=True)
+        with open('/tmp/MAGI/current_context.txt', 'w') as f:
+            f.write(f"Context: User is working with {window_name}")
     
-    def send_to_ollama(prompt):
-        try:
-            response = requests.post('http://localhost:11434/api/generate',
-                                   json={'model': config['ollama_model'],
-                                        'prompt': prompt})
-            if response.ok:
-                GLib.idle_add(response_label.set_text, response.json().get('response', 'No response'))
-        except Exception as e:
-            GLib.idle_add(response_label.set_text, f"Error: {str(e)}")
+    def handle_selection_change(window_name, selected_text):
+        """Handle selection changes within the same window"""
+        # Ignore the MAGI Assistant window
+        if window_name == "MAGI Assistant":
+            return
+            
+        if (window_name == current_state['window_name'] and 
+            selected_text and 
+            selected_text != current_state['last_selection']):
+            current_state['has_selection'] = True
+            current_state['last_selection'] = selected_text
+            context_label.set_text("Ask anything about your selection...")
+            
+            # Save selection context
+            with open('/tmp/MAGI/current_context.txt', 'w') as f:
+                f.write(f"Context: User has selected the following text in {window_name}:\n{selected_text}")
     
-    def on_enter(widget, event):
-        if event.keyval == Gdk.KEY_Return:
-            prompt = entry.get_text()
-            threading.Thread(target=send_to_ollama, args=(prompt,)).start()
-            entry.set_text("")
+    def update_context(*args):
+        """Update context and save to file"""
+        screen = Wnck.Screen.get_default()
+        active_window = screen.get_active_window()
+        
+        if active_window:
+            window_name = active_window.get_name()
+            
+            # Check if window changed
+            if window_name != current_state['window_name']:
+                handle_window_change(window_name)
+            else:
+                # Only check selection if we're in the same window
+                clipboard = Gtk.Clipboard.get(Gdk.SELECTION_PRIMARY)
+                selected_text = clipboard.wait_for_text()
+                handle_selection_change(window_name, selected_text)
+        else:
+            current_state['window_name'] = None
+            current_state['has_selection'] = False
+            current_state['last_selection'] = None
+            context_label.set_text("Ask anything...")
+            
+            # Clear context
+            with open('/tmp/MAGI/current_context.txt', 'w') as f:
+                f.write("")
     
-    entry.connect('key-press-event', on_enter)
+    def on_button_clicked(widget):
+        # Launch the menu app without updating context
+        subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), 'llm_menu.py')])
     
-    box.pack_start(entry, False, False, 2)
-    box.pack_start(response_label, True, True, 2)
-    return box
+    button.connect('clicked', on_button_clicked)
+    
+    # Monitor active window changes
+    screen = Wnck.Screen.get_default()
+    screen.connect('active-window-changed', update_context)
+    
+    # Monitor clipboard for selection changes
+    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_PRIMARY)
+    clipboard.connect('owner-change', update_context)
+    
+    # Initialize context
+    update_context()
+    
+    return button
 
 def create_tts_button():
     """Create text-to-speech button"""
@@ -364,6 +422,7 @@ def create_panel(position='top'):
     """Create a basic panel window"""
     window = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
     window.set_type_hint(Gdk.WindowTypeHint.DOCK)
+    window.set_accept_focus(False)  # Don't accept focus by default
     
     def update_panel_geometry(*args):
         screen = window.get_screen()
@@ -443,9 +502,9 @@ def setup_panels():
     # Create bottom panel
     bottom_panel, bottom_box = create_panel('bottom')
     
-    # Add LLM interface
-    llm_interface = create_llm_interface()
-    bottom_box.pack_start(llm_interface, True, True, 2)
+    # Add LLM interface button
+    llm_button = create_llm_interface_button()
+    bottom_box.pack_start(llm_button, False, False, 2)
     
     # Add TTS button
     tts_button = create_tts_button()
