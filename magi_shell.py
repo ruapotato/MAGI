@@ -28,6 +28,11 @@ config = None
 recording = False
 audio_data = []
 
+# Performance optimizations
+MONITOR_CHECK_INTERVAL = 5000  # Reduce monitor polling to 5 seconds
+SYSTEM_STATS_INTERVAL = 3000   # Reduce system stats updates to 3 seconds
+CLOCK_UPDATE_INTERVAL = 1000   # Keep clock at 1 second for accuracy
+
 def check_x11():
     """Ensure we have a valid X11 connection"""
     display = Gdk.Display.get_default()
@@ -65,55 +70,62 @@ def load_config():
             print(f"Warning: Could not save config: {e}")
 
 def create_system_monitor():
-    """Create system monitor widget with fixed-width labels"""
+    """Create optimized system monitor widget"""
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
     
-    # CPU and RAM labels with monospace font and fixed width
-    cpu_label = Gtk.Label()
-    ram_label = Gtk.Label()
-    gpu_label = Gtk.Label()
-    vram_label = Gtk.Label()
+    # Use a single label for all stats to reduce widget count
+    stats_label = Gtk.Label()
+    stats_label.get_style_context().add_class('monitor-label')
+    box.pack_start(stats_label, False, False, 2)
     
-    # Set monospace font and fixed width for all labels
-    for label in [cpu_label, ram_label, gpu_label, vram_label]:
-        label.get_style_context().add_class('monitor-label')
-    
-    box.pack_start(cpu_label, False, False, 2)
-    box.pack_start(ram_label, False, False, 2)
-    box.pack_start(gpu_label, False, False, 2)
-    box.pack_start(vram_label, False, False, 2)
-    
-    def update_stats():
-        # CPU and RAM
-        cpu_percent = psutil.cpu_percent()
-        ram_percent = psutil.virtual_memory().percent
-        
-        # GPU stats via NVIDIA
-        try:
-            handle = nvmlDeviceGetHandleByIndex(0)
-            util = nvmlDeviceGetUtilizationRates(handle)
-            mem = nvmlDeviceGetMemoryInfo(handle)
-            gpu_percent = util.gpu
-            vram_percent = (mem.used / mem.total) * 100
-        except:
-            gpu_percent = 0
-            vram_percent = 0
-        
-        # Format with fixed width
-        cpu_label.set_text(f"CPU: {cpu_percent:>5.1f}%")
-        ram_label.set_text(f"RAM: {ram_percent:>5.1f}%")
-        gpu_label.set_text(f"GPU: {gpu_percent:>5.1f}%")
-        vram_label.set_text(f"VRAM: {vram_percent:>5.1f}%")
-        return True
-    
-    # Initialize NVIDIA Management Library
+    # Initialize NVIDIA monitoring
+    nvidia_available = False
     try:
         nvmlInit()
+        nvidia_handle = nvmlDeviceGetHandleByIndex(0)
+        nvidia_available = True
     except:
         print("Warning: NVIDIA GPU monitoring not available")
     
+    # Cached psutil CPU percent
+    cpu_percent = psutil.cpu_percent()
+    last_cpu_update = time.time()
+    
+    def update_stats():
+        nonlocal cpu_percent, last_cpu_update
+        try:
+            # Update CPU less frequently
+            current_time = time.time()
+            if current_time - last_cpu_update >= 1:  # Update CPU every second
+                cpu_percent = psutil.cpu_percent()
+                last_cpu_update = current_time
+            
+            ram_percent = psutil.virtual_memory().percent
+            
+            if nvidia_available:
+                try:
+                    util = nvmlDeviceGetUtilizationRates(nvidia_handle)
+                    mem = nvmlDeviceGetMemoryInfo(nvidia_handle)
+                    gpu_percent = util.gpu
+                    vram_percent = (mem.used / mem.total) * 100
+                except:
+                    gpu_percent = vram_percent = 0
+            else:
+                gpu_percent = vram_percent = 0
+            
+            # Update all stats in a single label update
+            stats_label.set_text(
+                f"CPU: {cpu_percent:>5.1f}% | RAM: {ram_percent:>5.1f}% | "
+                f"GPU: {gpu_percent:>5.1f}% | VRAM: {vram_percent:>5.1f}%"
+            )
+            
+        except Exception as e:
+            print(f"Error updating stats: {e}")
+        
+        return True
+    
     update_stats()
-    GLib.timeout_add(2000, update_stats)
+    GLib.timeout_add(SYSTEM_STATS_INTERVAL, update_stats)
     return box
 
 def create_network_button():
@@ -126,17 +138,22 @@ def create_network_button():
     return button
 
 def create_clock():
-    """Create a clock widget with fixed width"""
+    """Create optimized clock widget"""
     label = Gtk.Label()
     label.get_style_context().add_class('clock-label')
     
+    # Pre-calculate format string
+    format_str = "%Y-%m-%d %H:%M:%S"
+    
     def update_clock():
-        # Use monospace font and fixed width format
-        label.set_text(time.strftime("%Y-%m-%d %H:%M:%S"))
-        return True
+        try:
+            label.set_text(time.strftime(format_str))
+            return True
+        except:
+            return False
     
     update_clock()
-    GLib.timeout_add(1000, update_clock)
+    GLib.timeout_add(CLOCK_UPDATE_INTERVAL, update_clock)
     return label
 
 def create_llm_interface_button():
@@ -379,24 +396,42 @@ def launch_menu():
         print(f"Error launching menu: {e}")
 
 def create_workspace_switcher():
-    """Create the workspace switcher"""
+    """Create optimized workspace switcher"""
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
     screen = Wnck.Screen.get_default()
     screen.force_update()
     
+    # Cache for workspace state
+    workspace_cache = {'count': 0, 'active': None}
+    
     def update_workspaces(*args):
-        for child in box.get_children():
-            box.remove(child)
-        
-        active_space = screen.get_active_workspace()
-        for i in range(screen.get_workspace_count()):
-            workspace = screen.get_workspace(i)
-            button = Gtk.Button(label=str(i + 1))
-            if workspace and workspace == active_space:
-                button.get_style_context().add_class('active-workspace')
-            button.connect('clicked', lambda w, num=i: switch_to_workspace(num))
-            box.pack_start(button, False, False, 0)
-        box.show_all()
+        try:
+            active_space = screen.get_active_workspace()
+            workspace_count = screen.get_workspace_count()
+            
+            # Check if anything changed
+            if (workspace_count == workspace_cache['count'] and 
+                active_space == workspace_cache['active']):
+                return
+            
+            workspace_cache['count'] = workspace_count
+            workspace_cache['active'] = active_space
+            
+            for child in box.get_children():
+                box.remove(child)
+            
+            for i in range(workspace_count):
+                workspace = screen.get_workspace(i)
+                button = Gtk.Button(label=str(i + 1))
+                if workspace and workspace == active_space:
+                    button.get_style_context().add_class('active-workspace')
+                button.connect('clicked', lambda w, num=i: switch_to_workspace(num))
+                box.pack_start(button, False, False, 0)
+            
+            box.show_all()
+            
+        except Exception as e:
+            print(f"Error updating workspaces: {e}")
     
     screen.connect('workspace-created', update_workspaces)
     screen.connect('workspace-destroyed', update_workspaces)
@@ -413,50 +448,67 @@ def switch_to_workspace(num):
         workspace.activate(GLib.get_current_time())
 
 def create_window_list():
-    """Create the window list for the panel"""
+    """Create optimized window list"""
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
     screen = Wnck.Screen.get_default()
     screen.force_update()
     
-    def update_window_list(*args):
-        # Clear existing buttons
-        for child in box.get_children():
-            box.remove(child)
-        
-        # Get current workspace
-        current_workspace = screen.get_active_workspace()
-        
-        # Get all windows on current workspace
-        windows = [win for win in screen.get_windows() 
-                  if not win.is_skip_tasklist() and 
-                  (win.get_workspace() == current_workspace or win.is_pinned())]
-        
-        # Calculate max width based on number of windows
-        max_chars = max(10, min(30, int(80 / max(1, len(windows)))))
-        
-        for window in windows:
-            # Truncate window title
-            title = window.get_name()
-            if len(title) > max_chars:
-                title = title[:max_chars-3] + "..."
-            
-            button = Gtk.Button(label=title)
-            
-            # Add active class if window is active
-            if window.is_active():
-                button.get_style_context().add_class('active-window')
-            
-            button.connect('clicked', lambda w, win=window: win.activate(GLib.get_current_time()))
-            box.pack_start(button, False, False, 0)
-        
-        box.show_all()
+    # Cache for window titles
+    title_cache = {}
     
+    def update_window_list(*args):
+        # Only update if the box is visible
+        if not box.get_visible():
+            return
+        
+        try:
+            current_workspace = screen.get_active_workspace()
+            
+            # Get windows efficiently
+            windows = [
+                win for win in screen.get_windows() 
+                if not win.is_skip_tasklist() and 
+                (win.get_workspace() == current_workspace or win.is_pinned())
+            ]
+            
+            # Calculate max width once
+            max_chars = max(10, min(30, int(80 / max(1, len(windows)))))
+            
+            # Remove old buttons
+            for child in box.get_children():
+                box.remove(child)
+            
+            # Update window buttons
+            for window in windows:
+                window_id = window.get_xid()
+                
+                # Check title cache
+                current_title = window.get_name()
+                if window_id not in title_cache or title_cache[window_id] != current_title:
+                    title_cache[window_id] = current_title
+                    if len(current_title) > max_chars:
+                        title_cache[window_id] = current_title[:max_chars-3] + "..."
+                
+                button = Gtk.Button(label=title_cache[window_id])
+                
+                if window.is_active():
+                    button.get_style_context().add_class('active-window')
+                
+                button.connect('clicked', lambda w, win=window: win.activate(GLib.get_current_time()))
+                box.pack_start(button, False, False, 0)
+            
+            box.show_all()
+            
+        except Exception as e:
+            print(f"Error updating window list: {e}")
+    
+    # Optimize event connections
     screen.connect('window-opened', update_window_list)
     screen.connect('window-closed', update_window_list)
-    screen.connect('window-stacking-changed', update_window_list)
     screen.connect('active-window-changed', update_window_list)
     screen.connect('active-workspace-changed', update_window_list)
     
+    # Initial update
     GLib.idle_add(update_window_list)
     return box
 
