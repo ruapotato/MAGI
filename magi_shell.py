@@ -227,7 +227,9 @@ def create_llm_interface_button():
 
 def create_tts_button():
     """Create text-to-speech button"""
-    button = Gtk.Button(label="🔊")
+    button = Gtk.Button()
+    icon = Gtk.Image.new_from_icon_name("audio-speakers-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+    button.add(icon)
     
     def speak_selection(*args):
         try:
@@ -244,56 +246,75 @@ def create_tts_button():
 
 def create_voice_input():
     """Create voice input button that sends to Whisper server"""
-    button = Gtk.Button(label="🎤")
+    button = Gtk.Button()
     stream = None
+    record_start_time = 0
+    recording = False  # Add this line to define the recording variable
     
-    def start_recording():
-        nonlocal stream
+    # Create icons
+    mic_icon = Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+    record_icon = Gtk.Image.new_from_icon_name("media-record-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
+    button.add(mic_icon)
+    
+    def start_recording(*args):
+        nonlocal stream, record_start_time, recording  # Add 'recording' here
         audio_data.clear()
+        record_start_time = time.time()
+        recording = True  # Set recording to True when starting
+        
+        # Swap to record icon
+        button.remove(button.get_child())
+        button.add(record_icon)
+        button.show_all()
         
         def audio_callback(indata, frames, time, status):
+            nonlocal recording  # Add this line to access the 'recording' variable
             if recording:
                 audio_data.append(indata.copy())
         
-        stream = sd.InputStream(
-            callback=audio_callback,
-            channels=1,
-            samplerate=16000,
-            blocksize=1024,
-            dtype=np.float32
-        )
-        stream.start()
-    
-    def stop_recording():
-        nonlocal stream
-        if stream is not None:
-            stream.stop()
-            stream.close()
-            stream = None
-    
-    def on_press(*args):
-        global recording
-        print("DEBUG: Starting recording")
         try:
-            recording = True
-            start_recording()
+            stream = sd.InputStream(
+                callback=audio_callback,
+                channels=1,
+                samplerate=16000,
+                blocksize=1024,
+                dtype=np.float32
+            )
+            stream.start()
             GLib.idle_add(lambda: button.get_style_context().add_class('recording'))
-            GLib.idle_add(lambda: button.set_label("🔴"))
             print("DEBUG: Recording stream started")
         except Exception as e:
             print(f"Recording Error: {e}")
             recording = False
             GLib.idle_add(lambda: button.get_style_context().remove_class('recording'))
-            GLib.idle_add(lambda: button.set_label("🎤"))
+            # Swap back to mic icon
+            button.remove(button.get_child())
+            button.add(mic_icon)
+            button.show_all()
     
-    def on_release(*args):
-        global recording
+    def stop_recording(*args):
+        nonlocal stream, record_start_time, recording  # Add 'recording' here
         print("DEBUG: Stopping recording")
+        recording = False  # Set recording to False when stopping
+        recording_duration = time.time() - record_start_time
+        
+        # Swap back to mic icon
+        button.remove(button.get_child())
+        button.add(mic_icon)
+        button.show_all()
+        
         try:
-            recording = False
-            stop_recording()
+            if stream:
+                stream.stop()
+                stream.close()
+                stream = None
             GLib.idle_add(lambda: button.get_style_context().remove_class('recording'))
-            GLib.idle_add(lambda: button.set_label("🎤"))
+            
+            # Check if the recording was too short
+            if recording_duration < 0.5:
+                print("DEBUG: Recording too short, playing help message")
+                subprocess.Popen(['espeak', "Press and hold to record audio"])
+                return
             
             if audio_data:
                 print(f"DEBUG: Got {len(audio_data)} chunks of audio data")
@@ -319,7 +340,6 @@ def create_voice_input():
                         import traceback
                         traceback.print_exc()
                 
-                # Run transcription in a separate thread
                 threading.Thread(target=transcribe, daemon=True).start()
             else:
                 print("DEBUG: No audio data collected")
@@ -329,27 +349,10 @@ def create_voice_input():
             import traceback
             traceback.print_exc()
         finally:
-            recording = False
             GLib.idle_add(lambda: button.get_style_context().remove_class('recording'))
-            GLib.idle_add(lambda: button.set_label("🎤"))
     
-    button.connect('pressed', on_press)
-    button.connect('released', on_release)
-    
-    # Add CSS for recording indicator
-    css = b"""
-    .recording {
-        background-color: #ff4444;
-        color: white;
-    }
-    """
-    style_provider = Gtk.CssProvider()
-    style_provider.load_from_data(css)
-    Gtk.StyleContext.add_provider_for_screen(
-        Gdk.Screen.get_default(),
-        style_provider,
-        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-    )
+    button.connect('pressed', start_recording)
+    button.connect('released', stop_recording)
     
     return button
 
@@ -557,7 +560,6 @@ def setup_panels():
     return panels
 
 def setup_styles():
-    """Set up CSS styles"""
     css = b"""
     .launcher-button {
         background: linear-gradient(135deg, #7aa2f7, #2ac3de);
@@ -590,22 +592,24 @@ def setup_styles():
     }
     
     button {
-        background: #292e42;
-        color: #c0caf5;
-        border: 1px solid #3b4261;
-        border-radius: 8px;
-        padding: 2px 8px;
+    background: #292e42;
+    color: #7aa2f7;  /* Change the color to blue */
+    border: 1px solid #3b4261;
+    border-radius: 8px;
+    padding: 2px 8px;
     }
-    
+
     button:hover {
         background: #343b58;
         border-color: #7aa2f7;
+        color: #a9c0ff;  /* Lighter blue on hover */
     }
-    
+
     button:active {
         background: #1a1b26;
+        color: #6b8ee6;  /* Darker blue when active */
     }
-    
+        
     label {
         color: #c0caf5;
     }
@@ -625,7 +629,7 @@ def setup_styles():
     .recording {
         background-color: #f7768e;
         border: 2px solid #ff99a3;
-        color: white;
+        color: white;  /* White icon when recording */
     }
     """
     style_provider = Gtk.CssProvider()
