@@ -78,7 +78,7 @@ lb config \
     --backports true \
     --binary-images iso-hybrid \
     --iso-publisher "MAGI OS" \
-    --iso-volume "MAGI OS Live" \
+    --iso-volume "MAGI OS" \
     --memtest none \
     --win32-loader false \
     --apt-secure true \
@@ -89,8 +89,69 @@ lb config \
 # Create directories for hooks and includes
 echo -e "${BLUE}Creating hook directories...${NC}"
 mkdir -p config/hooks/live/
+mkdir -p config/includes.chroot/etc/default/
+mkdir -p config/includes.chroot/etc/modprobe.d/
+mkdir -p config/includes.binary/boot/grub/
 mkdir -p config/includes.chroot/usr/local/bin/
 mkdir -p config/debian-installer/
+
+# Create GRUB customization
+echo -e "${BLUE}Customizing GRUB...${NC}"
+cat > config/includes.binary/boot/grub/theme.txt << 'EOF'
+desktop-image: "background.png"
+title-text: "MAGI OS"
+title-color: "#7aa2f7"
+title-font: "DejaVu Sans Bold 16"
+message-font: "DejaVu Sans 12"
+terminal-font: "DejaVu Sans Mono 12"
+
++ boot_menu {
+    left = 15%
+    width = 70%
+    top = 20%
+    height = 60%
+    item_font = "DejaVu Sans 12"
+    item_color = "#c0caf5"
+    selected_item_color = "#7aa2f7"
+    item_height = 24
+    item_padding = 5
+    item_spacing = 1
+}
+
++ progress_bar {
+    id = "__timeout__"
+    left = 15%
+    width = 70%
+    top = 85%
+    height = 16
+    show_text = true
+    font = "DejaVu Sans 12"
+    text_color = "#7aa2f7"
+    fg_color = "#7aa2f7"
+    bg_color = "#1a1b26"
+    border_color = "#565f89"
+}
+EOF
+
+# Create GRUB default configuration
+cat > config/includes.chroot/etc/default/grub << 'EOF'
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR="MAGI"
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash nouveau.modeset=0 rd.driver.blacklist=nouveau nvidia-drm.modeset=1"
+GRUB_CMDLINE_LINUX=""
+GRUB_BACKGROUND="/usr/share/magi/backgrounds/default.png"
+GRUB_THEME="/boot/grub/theme.txt"
+EOF
+
+# Create nouveau blacklist
+cat > config/includes.chroot/etc/modprobe.d/blacklist-nouveau.conf << 'EOF'
+blacklist nouveau
+blacklist lbm-nouveau
+options nouveau modeset=0
+alias nouveau off
+alias lbm-nouveau off
+EOF
 
 # Create NVIDIA driver hook
 echo -e "${BLUE}Creating NVIDIA configuration...${NC}"
@@ -104,7 +165,10 @@ apt-get install -y \
     curl \
     wget \
     gnupg \
-    software-properties-common
+    software-properties-common \
+    dkms \
+    build-essential \
+    linux-headers-amd64
 
 # Enable non-free and contrib repositories
 cat > /etc/apt/sources.list << 'SOURCES'
@@ -121,17 +185,30 @@ rm cuda-keyring_1.1-1_all.deb
 # Update package lists
 apt-get update
 
-# Install NVIDIA drivers
+# Install NVIDIA drivers with DKMS support
 apt-get install -y \
     nvidia-driver \
     nvidia-settings \
     nvidia-cuda-toolkit \
     firmware-misc-nonfree
 
-# Create Xorg config directory
-mkdir -p /etc/X11/xorg.conf.d/
+# Ensure nouveau is blacklisted
+cat > /etc/modprobe.d/blacklist-nouveau.conf << 'BLACKLIST'
+blacklist nouveau
+blacklist lbm-nouveau
+options nouveau modeset=0
+alias nouveau off
+alias lbm-nouveau off
+BLACKLIST
 
-# Configure NVIDIA driver
+# Configure NVIDIA driver loading
+cat > /etc/modprobe.d/nvidia.conf << 'MODPROBE'
+options nvidia-drm modeset=1
+options nvidia NVreg_PreserveVideoMemoryAllocations=1
+MODPROBE
+
+# Create custom X11 configuration for NVIDIA
+mkdir -p /etc/X11/xorg.conf.d/
 cat > /etc/X11/xorg.conf.d/10-nvidia.conf << 'XORG'
 Section "OutputClass"
     Identifier "NVIDIA"
@@ -139,133 +216,32 @@ Section "OutputClass"
     Driver "nvidia"
     Option "AllowEmptyInitialConfiguration"
     Option "PrimaryGPU" "yes"
+    Option "ModulePath" "/usr/lib/x86_64-linux-gnu/nvidia/xorg"
+EndSection
+
+Section "Device"
+    Identifier "NVIDIA Card"
+    Driver "nvidia"
+    Option "NoLogo" "true"
 EndSection
 XORG
 
-# Configure module loading
-cat > /etc/modprobe.d/nvidia.conf << 'MODPROBE'
-options nvidia-drm modeset=1
-options nvidia NVreg_PreserveVideoMemoryAllocations=1
-MODPROBE
-
-# Create driver detection script
-cat > /usr/local/sbin/nvidia-driver-setup << 'SCRIPT'
-#!/bin/bash
-set -e
-
-# Load nvidia module with modeset
-modprobe nvidia-drm modeset=1
-
-# Detect GPU
-gpu_name=$(lspci -nn | grep -i nvidia | head -n1)
-echo "Detected GPU: $gpu_name"
-
-# Configure Prime if needed (for laptops with hybrid graphics)
-if lspci | grep -i intel > /dev/null && lspci | grep -i nvidia > /dev/null; then
-    echo "Hybrid graphics detected, configuring PRIME..."
-    prime-select nvidia
-fi
-
-# Update initramfs to include nvidia modules
-update-initramfs -u
-
-# Restart display manager if it's running
-if systemctl is-active --quiet display-manager; then
-    systemctl restart display-manager
-fi
-SCRIPT
-
-chmod +x /usr/local/sbin/nvidia-driver-setup
-
-# Create systemd service
-cat > /etc/systemd/system/nvidia-driver-setup.service << 'SERVICE'
-[Unit]
-Description=NVIDIA Driver Setup
-Before=display-manager.service
-After=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/nvidia-driver-setup
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
-# Enable the service
-systemctl enable nvidia-driver-setup.service
-
-# Configure initramfs
-cat > /etc/initramfs-tools/conf.d/nvidia.conf << 'INITRAMFS'
-MODULES=most
-MODULESDIR=/lib/modules
-INITRAMFS
-
-# Update initramfs
+# Update initramfs to apply changes
 update-initramfs -u -k all
 
-echo "NVIDIA driver installation and configuration completed"
+# Create display manager configuration for NVIDIA
+mkdir -p /etc/gdm3
+cat > /etc/gdm3/custom.conf << 'GDM'
+[daemon]
+WaylandEnable=false
+DefaultSession=magi
+GDM
+
+# Clean up
+apt-get clean
 EOF
 
 chmod +x config/hooks/live/nvidia.hook.chroot
-
-# Create MAGI installation script
-echo -e "${BLUE}Creating MAGI installation scripts...${NC}"
-cat > config/includes.chroot/usr/local/bin/install-magi << 'EOF'
-#!/bin/bash
-set -e
-
-# Clone MAGI repository
-git clone https://github.com/yourusername/magi /opt/magi
-cd /opt/magi
-./setup.sh
-
-# Create update script
-cat > /usr/local/bin/update-magi << 'UPDATE'
-#!/bin/bash
-set -e
-cd /opt/magi
-git pull
-./setup.sh
-apt-get update && apt-get upgrade -y
-UPDATE
-
-chmod +x /usr/local/bin/update-magi
-EOF
-
-chmod +x config/includes.chroot/usr/local/bin/install-magi
-
-# Create installer configuration
-echo -e "${BLUE}Creating installer configuration...${NC}"
-cat > config/debian-installer/preseed.cfg << 'EOF'
-# Basic system configuration
-d-i debian-installer/locale string en_US.UTF-8
-d-i keyboard-configuration/xkb-keymap select us
-d-i netcfg/choose_interface select auto
-d-i netcfg/get_hostname string magi
-d-i netcfg/get_domain string localdomain
-
-# Partitioning
-d-i partman-auto/method string regular
-d-i partman-auto/choose_recipe select atomic
-d-i partman-partitioning/confirm_write_new_label boolean true
-d-i partman/choose_partition select finish
-d-i partman/confirm boolean true
-d-i partman/confirm_nooverwrite boolean true
-
-# Package selection
-tasksel tasksel/first multiselect standard
-d-i pkgsel/include string openssh-server
-
-# Boot loader installation
-d-i grub-installer/only_debian boolean true
-d-i grub-installer/bootdev string default
-d-i grub-installer/with_other_os boolean true
-
-# Finishing up
-d-i finish-install/reboot_in_progress note
-EOF
 
 # Build the ISO
 echo -e "${BLUE}Starting ISO build...${NC}"
