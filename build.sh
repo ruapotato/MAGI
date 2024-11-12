@@ -93,6 +93,9 @@ mkdir -p config/includes.chroot/etc/default/
 mkdir -p config/includes.chroot/etc/modprobe.d/
 mkdir -p config/includes.binary/boot/grub/
 mkdir -p config/includes.chroot/usr/local/bin/
+mkdir -p config/includes.chroot/etc/gdm3/
+mkdir -p config/includes.chroot/etc/skel/.config/magi/
+mkdir -p config/includes.chroot/opt/magi/
 mkdir -p config/debian-installer/
 
 # Create GRUB customization
@@ -153,6 +156,225 @@ alias nouveau off
 alias lbm-nouveau off
 EOF
 
+# Create MATE and dependencies hook
+cat > config/hooks/live/mate-setup.hook.chroot << 'EOF'
+#!/bin/bash
+set -e
+
+# Install MATE desktop and required packages
+apt-get update
+apt-get install -y \
+    curl \
+    wget \
+    gnupg \
+    ca-certificates \
+    mate-desktop-environment \
+    mate-desktop-environment-extras \
+    mate-terminal \
+    mate-power-manager \
+    mate-polkit \
+    gdm3 \
+    python3-pip \
+    python3-venv \
+    python3-gi \
+    python3-gi-cairo \
+    python3-dev \
+    python3-setuptools \
+    python3-wheel \
+    libgirepository1.0-dev \
+    pkg-config \
+    libcairo2-dev \
+    libportaudio2 \
+    portaudio19-dev \
+    gir1.2-gtk-3.0 \
+    gir1.2-wnck-3.0 \
+    adwaita-icon-theme \
+    dbus-x11 \
+    at-spi2-core \
+    xdotool \
+    espeak \
+    feh \
+    xcompmgr \
+    rofi \
+    alacritty
+
+# Configure GDM3
+cat > /etc/gdm3/custom.conf << 'GDM'
+[daemon]
+WaylandEnable=false
+DefaultSession=mate
+AutomaticLoginEnable=false
+GDM
+
+# Create Python virtual environment and install dependencies
+python3 -m venv /opt/magi/ears_pyenv
+source /opt/magi/ears_pyenv/bin/activate
+
+# Upgrade pip first
+pip install --upgrade pip
+
+# Install packages with longer timeout and retries
+pip install --no-cache-dir --timeout 100 --retries 3 \
+    flask \
+    numpy \
+    sounddevice \
+    requests \
+    nvidia-ml-py \
+    psutil
+
+# Install PyTorch separately with specific timeout
+pip install --no-cache-dir --timeout 300 --retries 3 \
+    torch \
+    torchvision \
+    torchaudio
+
+# Install transformers and accelerate separately
+pip install --no-cache-dir --timeout 300 --retries 3 \
+    transformers \
+    "accelerate>=0.26.0"
+
+# Verify installations
+pip list
+
+deactivate
+
+# Install Ollama
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://ollama.com/install.sh > /tmp/ollama_install.sh
+chmod +x /tmp/ollama_install.sh
+sh /tmp/ollama_install.sh
+rm /tmp/ollama_install.sh
+
+# Create Ollama systemd service
+cat > /etc/systemd/system/ollama.service << 'SERVICE'
+[Unit]
+Description=Ollama Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ollama serve
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+# Enable Ollama service
+systemctl enable ollama.service
+
+# Pull Mistral model (will be done on first boot)
+cat > /usr/local/bin/magi-first-boot << 'FIRSTBOOT'
+#!/bin/bash
+systemctl start ollama
+sleep 5
+ollama pull mistral
+FIRSTBOOT
+
+chmod +x /usr/local/bin/magi-first-boot
+
+# Create first-boot service
+cat > /etc/systemd/system/magi-first-boot.service << 'FIRSTBOOTSERVICE'
+[Unit]
+Description=MAGI First Boot Setup
+After=ollama.service
+Wants=ollama.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/magi-first-boot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+FIRSTBOOTSERVICE
+
+systemctl enable magi-first-boot.service
+
+# Copy MAGI files to the correct location
+if [ -d "/magi" ]; then
+    cp -r /magi/* /opt/magi/
+elif [ -d "/usr/local/magi" ]; then
+    cp -r /usr/local/magi/* /opt/magi/
+else
+    # Create minimal structure if files aren't available
+    mkdir -p /opt/magi/{bin,config,logs}
+    touch /opt/magi/.magi-placeholder
+fi
+
+# Ensure proper permissions
+chown -R root:root /opt/magi
+chmod -R 755 /opt/magi
+
+# Set up MAGI config
+cat > /etc/skel/.config/magi/config.json << 'CONFIG'
+{
+    "panel_height": 28,
+    "workspace_count": 4,
+    "enable_effects": true,
+    "enable_ai": true,
+    "terminal": "mate-terminal",
+    "launcher": "mate-panel --run-dialog",
+    "background": "/usr/share/magi/backgrounds/default.png",
+    "ollama_model": "mistral",
+    "whisper_endpoint": "http://localhost:5000/transcribe",
+    "sample_rate": 16000
+}
+CONFIG
+
+# Create MAGI systemd service
+cat > /etc/systemd/system/magi-whisper.service << 'SERVICE'
+[Unit]
+Description=MAGI Whisper Speech Recognition Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/magi/start_whisper_server.sh
+WorkingDirectory=/opt/magi
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+# Enable MAGI service
+systemctl enable magi-whisper.service
+
+# Create MAGI session entry
+cat > /usr/share/xsessions/magi.desktop << 'DESKTOP'
+[Desktop Entry]
+Name=MAGI Shell
+Comment=Machine Augmented GTK Interface
+Exec=/opt/magi/start.sh
+Type=Application
+DesktopNames=MAGI
+DESKTOP
+
+# Remove GNOME packages if they were installed
+apt-get remove -y --purge \
+    gnome-shell \
+    gnome-session \
+    gnome-settings-daemon \
+    gnome-control-center \
+    gdm3-
+apt-get autoremove -y
+
+# Install GDM3 after GNOME removal
+apt-get install -y gdm3
+
+# Set GDM as default display manager
+echo "/usr/sbin/gdm3" > /etc/X11/default-display-manager
+
+# Clean up
+apt-get clean
+EOF
+
+chmod +x config/hooks/live/mate-setup.hook.chroot
+
 # Create NVIDIA driver hook
 echo -e "${BLUE}Creating NVIDIA configuration...${NC}"
 cat > config/hooks/live/nvidia.hook.chroot << 'EOF'
@@ -192,15 +414,6 @@ apt-get install -y \
     nvidia-cuda-toolkit \
     firmware-misc-nonfree
 
-# Ensure nouveau is blacklisted
-cat > /etc/modprobe.d/blacklist-nouveau.conf << 'BLACKLIST'
-blacklist nouveau
-blacklist lbm-nouveau
-options nouveau modeset=0
-alias nouveau off
-alias lbm-nouveau off
-BLACKLIST
-
 # Configure NVIDIA driver loading
 cat > /etc/modprobe.d/nvidia.conf << 'MODPROBE'
 options nvidia-drm modeset=1
@@ -229,19 +442,24 @@ XORG
 # Update initramfs to apply changes
 update-initramfs -u -k all
 
-# Create display manager configuration for NVIDIA
-mkdir -p /etc/gdm3
-cat > /etc/gdm3/custom.conf << 'GDM'
-[daemon]
-WaylandEnable=false
-DefaultSession=magi
-GDM
-
-# Clean up
-apt-get clean
 EOF
 
 chmod +x config/hooks/live/nvidia.hook.chroot
+
+# Create MAGI directory in chroot
+mkdir -p config/includes.chroot/usr/local/magi/
+
+# Copy MAGI files to chroot
+if [ -f "../magi_shell.py" ]; then
+    cp -v ../magi_shell.py ../start.sh ../server.py ../setup.sh config/includes.chroot/usr/local/magi/
+    chmod +x config/includes.chroot/usr/local/magi/*.sh config/includes.chroot/usr/local/magi/*.py
+else
+    echo -e "${YELLOW}Warning: MAGI source files not found in parent directory${NC}"
+    touch config/includes.chroot/usr/local/magi/.magi-placeholder
+fi
+
+# Ensure proper ownership and permissions
+chmod -R 755 config/includes.chroot/usr/local/magi/
 
 # Build the ISO
 echo -e "${BLUE}Starting ISO build...${NC}"
