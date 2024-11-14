@@ -96,8 +96,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ## Contact
 
-David Hamner  
-Project Status: Experimental Demo
+David Hamner (ke7oxh@gmail.com)
+Project Status: Cool Experimental Demo
 
 ---
 *Note: This is a research project exploring AI integration in desktop environments. Many planned features are still in conceptual stages.*
