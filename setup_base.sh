@@ -53,13 +53,20 @@ mkdir -p config/includes.chroot/usr/share/magi/backgrounds
 mkdir -p config/includes.chroot/opt/magi/
 mkdir -p config/includes.chroot/opt/nvidia-drivers/
 
-# Create NVIDIA driver cache directory
-echo "Downloading NVIDIA drivers..."
-NVIDIA_DRIVERS=(
-    "535.216.01-1"  # Latest
-    "525.147.05-7"  # Legacy
-    "470.256.02-2"  # Legacy
-)
+# Check available NVIDIA drivers in Debian repo
+echo "Checking available NVIDIA drivers..."
+LATEST_DRIVERS=$(curl -s https://deb.debian.org/debian/pool/non-free/n/nvidia-graphics-drivers/ | \
+    grep -o 'nvidia-driver_[0-9.]\+-[0-9]\+_amd64.deb' | \
+    cut -d'_' -f2 | sort -V | uniq | tail -n 3)
+
+if [ -z "$LATEST_DRIVERS" ]; then
+    echo "Error: Could not fetch driver versions"
+    exit 1
+fi
+
+# Convert to array
+readarray -t NVIDIA_DRIVERS <<< "$LATEST_DRIVERS"
+echo "Found driver versions: ${NVIDIA_DRIVERS[*]}"
 
 for version in "${NVIDIA_DRIVERS[@]}"; do
     echo "Downloading NVIDIA driver version $version..."
@@ -76,37 +83,19 @@ for version in "${NVIDIA_DRIVERS[@]}"; do
     
     for pkg in "${packages[@]}"; do
         wget -q -P config/includes.chroot/opt/nvidia-drivers/ \
-            "http://deb.debian.org/debian/pool/non-free-firmware/n/nvidia-graphics-drivers/${pkg}_${version}_amd64.deb" || \
+            "https://deb.debian.org/debian/pool/non-free/n/nvidia-graphics-drivers/${pkg}_${version}_amd64.deb" || \
             echo "Warning: Failed to download ${pkg}_${version}"
     done
 done
 
-# Create version mapping file
-cat > config/includes.chroot/opt/nvidia-drivers/versions.conf << 'EOF'
+# Generate version mapping file
+cat > config/includes.chroot/opt/nvidia-drivers/versions.conf << EOF
 # GPU Model to Driver Version mapping
 # Format: GPU_ID:DRIVER_VERSION
+# Last updated: $(date)
 
-# Legacy GPUs (470 series)
-0FC0:470.256.02-2  # GT 710
-0FC1:470.256.02-2  # GT 730
-1180:470.256.02-2  # GTX 680
-1183:470.256.02-2  # GTX 660
-
-# Modern GPUs (525 series)
-1B80:525.147.05-7  # GTX 1080
-1B81:525.147.05-7  # GTX 1070
-1B84:525.147.05-7  # GTX 1060 3GB
-1B83:525.147.05-7  # GTX 1060 6GB
-
-# Latest GPUs (535 series)
-2204:535.216.01-1  # RTX 3090
-2206:535.216.01-1  # RTX 3080
-2208:535.216.01-1  # RTX 3070
-2684:535.216.01-1  # RTX 4090
-2782:535.216.01-1  # RTX 4080
-
-# Default for unknown cards
-DEFAULT:535.216.01-1
+# Using latest version: ${NVIDIA_DRIVERS[-1]}
+DEFAULT:${NVIDIA_DRIVERS[-1]}
 EOF
 
 # Copy MAGI files
@@ -114,16 +103,9 @@ echo "Copying MAGI files..."
 cp ../magi_shell.py config/includes.chroot/opt/magi/
 cp ../server.py config/includes.chroot/opt/magi/
 cp ../llm_menu.py config/includes.chroot/opt/magi/
+cp ../start.sh config/includes.chroot/opt/magi/
 
 # Create startup scripts
-cat > config/includes.chroot/opt/magi/start.sh << 'EOF'
-#!/bin/bash
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-export DISPLAY=:0
-export XAUTHORITY="$HOME/.Xauthority"
-exec python3 "$SCRIPT_DIR/magi_shell.py"
-EOF
-
 cat > config/includes.chroot/opt/magi/start_whisper_server.sh << 'EOF'
 #!/bin/bash
 source /opt/magi/ears_pyenv/bin/activate

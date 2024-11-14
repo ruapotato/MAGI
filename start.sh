@@ -3,10 +3,6 @@
 # Get the script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-# Ensure basic X11 environment
-if [ -z "$DISPLAY" ]; then
-    export DISPLAY=:0
-fi
 
 # Create log directories
 mkdir -p "$HOME/.cache/magi/logs"

@@ -346,6 +346,17 @@ Environment=XAUTHORITY=/home/magi/.Xauthority
 WantedBy=graphical.target
 EOF
 
+# Configure TTY autologin
+mkdir -p /etc/systemd/system/getty@tty{1,2,3,4,5,6}.service.d/
+for i in {1..6}; do
+    cat > "/etc/systemd/system/getty@tty${i}.service.d/override.conf" << EOF
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin magi --noclear %I \$TERM
+Type=idle
+EOF
+done
+
 # Create magi user if it doesn't exist
 if ! id -u magi >/dev/null 2>&1; then
     useradd -m -s /bin/bash magi
