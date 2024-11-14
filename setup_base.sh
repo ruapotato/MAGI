@@ -51,6 +51,63 @@ mkdir -p config/includes.chroot/etc/{default,modprobe.d,gdm3,skel/.config/magi}
 mkdir -p config/includes.binary/boot/grub/
 mkdir -p config/includes.chroot/usr/share/magi/backgrounds
 mkdir -p config/includes.chroot/opt/magi/
+mkdir -p config/includes.chroot/opt/nvidia-drivers/
+
+# Create NVIDIA driver cache directory
+echo "Downloading NVIDIA drivers..."
+NVIDIA_DRIVERS=(
+    "535.216.01-1"  # Latest
+    "525.147.05-7"  # Legacy
+    "470.256.02-2"  # Legacy
+)
+
+for version in "${NVIDIA_DRIVERS[@]}"; do
+    echo "Downloading NVIDIA driver version $version..."
+    
+    packages=(
+        "nvidia-driver"
+        "nvidia-kernel-support"
+        "nvidia-kernel-dkms"
+        "nvidia-driver-libs"
+        "xserver-xorg-video-nvidia"
+        "libnvidia-encode"
+        "libnvidia-compute"
+    )
+    
+    for pkg in "${packages[@]}"; do
+        wget -q -P config/includes.chroot/opt/nvidia-drivers/ \
+            "http://deb.debian.org/debian/pool/non-free-firmware/n/nvidia-graphics-drivers/${pkg}_${version}_amd64.deb" || \
+            echo "Warning: Failed to download ${pkg}_${version}"
+    done
+done
+
+# Create version mapping file
+cat > config/includes.chroot/opt/nvidia-drivers/versions.conf << 'EOF'
+# GPU Model to Driver Version mapping
+# Format: GPU_ID:DRIVER_VERSION
+
+# Legacy GPUs (470 series)
+0FC0:470.256.02-2  # GT 710
+0FC1:470.256.02-2  # GT 730
+1180:470.256.02-2  # GTX 680
+1183:470.256.02-2  # GTX 660
+
+# Modern GPUs (525 series)
+1B80:525.147.05-7  # GTX 1080
+1B81:525.147.05-7  # GTX 1070
+1B84:525.147.05-7  # GTX 1060 3GB
+1B83:525.147.05-7  # GTX 1060 6GB
+
+# Latest GPUs (535 series)
+2204:535.216.01-1  # RTX 3090
+2206:535.216.01-1  # RTX 3080
+2208:535.216.01-1  # RTX 3070
+2684:535.216.01-1  # RTX 4090
+2782:535.216.01-1  # RTX 4080
+
+# Default for unknown cards
+DEFAULT:535.216.01-1
+EOF
 
 # Copy MAGI files
 echo "Copying MAGI files..."

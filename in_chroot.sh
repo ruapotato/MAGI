@@ -5,6 +5,12 @@ set -e
 # Install desktop environment and dependencies
 apt-get update
 apt-get install -y \
+    pciutils \
+    kmod \
+    linux-headers-amd64 \
+    build-essential \
+    dkms \
+    pkg-config \
     xserver-xorg \
     xserver-xorg-core \
     xserver-xorg-input-all \
@@ -53,43 +59,80 @@ apt-get install -y \
     pulseaudio \
     pavucontrol
 
+# Create NVIDIA detection and setup script
+cat > /usr/local/bin/nvidia-live-setup << 'EOF'
+#!/bin/bash
 
-setup_nvidia() {
-    echo "Setting up NVIDIA drivers for modern GPUs..."
+NVIDIA_DETECT_LOG="/var/log/nvidia-detect.log"
+DRIVER_DIR="/opt/nvidia-drivers"
 
-    # Add non-free repositories
-    cat > /etc/apt/sources.list << 'SOURCES'
-deb http://deb.debian.org/debian/ bookworm main contrib non-free non-free-firmware
-deb http://security.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
-deb http://deb.debian.org/debian/ bookworm-updates main contrib non-free non-free-firmware
-SOURCES
+echo "Starting NVIDIA GPU detection..." | tee -a "$NVIDIA_DETECT_LOG"
 
-    # Update package lists
-    apt-get update
+# Detect NVIDIA card
+gpu_info=$(lspci -nn | grep -i nvidia)
+if [ -z "$gpu_info" ]; then
+    echo "No NVIDIA GPU detected" | tee -a "$NVIDIA_DETECT_LOG"
+    exit 0
+fi
 
-    # Install essential packages
-    apt-get install -y \
-        linux-headers-amd64 \
-        build-essential \
-        dkms \
-        pkg-config
+device_id=$(echo "$gpu_info" | grep -oP "10de:\K[0-9a-f]{4}")
+echo "Detected NVIDIA GPU with device ID: $device_id" | tee -a "$NVIDIA_DETECT_LOG"
 
-    # Install NVIDIA drivers - explicitly specify version
-    apt-get install -y \
-        nvidia-kernel-common \
-        nvidia-driver \
-        nvidia-kernel-dkms \
-        firmware-misc-nonfree
+# Load version mapping
+if [ -f "/opt/nvidia-drivers/versions.conf" ]; then
+    driver_version=$(grep "^$device_id:" /opt/nvidia-drivers/versions.conf | cut -d: -f2 | tr -d ' ')
+    if [ -z "$driver_version" ]; then
+        driver_version=$(grep "DEFAULT:" /opt/nvidia-drivers/versions.conf | cut -d: -f2 | tr -d ' ')
+    fi
+else
+    # Default to latest stable if no mapping exists
+    driver_version=$(ls /opt/nvidia-drivers/nvidia-driver_* 2>/dev/null | sort -V | tail -n1 | grep -oP '\d+\.\d+\.\d+-\d+' || echo "")
+fi
 
-    # Create module configuration
-    cat > /etc/modprobe.d/nvidia.conf << 'EOF'
+if [ -z "$driver_version" ]; then
+    echo "No suitable driver found" | tee -a "$NVIDIA_DETECT_LOG"
+    exit 1
+fi
+
+echo "Installing NVIDIA driver version $driver_version..." | tee -a "$NVIDIA_DETECT_LOG"
+
+# Install drivers in correct order
+packages=(
+    "nvidia-kernel-support"
+    "nvidia-kernel-dkms"
+    "nvidia-driver-libs"
+    "nvidia-driver"
+    "xserver-xorg-video-nvidia"
+)
+
+for pkg in "${packages[@]}"; do
+    if [ -f "$DRIVER_DIR/${pkg}_${driver_version}_amd64.deb" ]; then
+        echo "Installing $pkg..." | tee -a "$NVIDIA_DETECT_LOG"
+        dpkg -i "$DRIVER_DIR/${pkg}_${driver_version}_amd64.deb" || true
+    fi
+done
+
+# Fix dependencies
+apt-get install -f -y
+
+# Configure modules
+echo "Configuring NVIDIA modules..." | tee -a "$NVIDIA_DETECT_LOG"
+cat > /etc/modprobe.d/nvidia.conf << 'MODCONF'
 options nvidia-drm modeset=1
 options nvidia NVreg_PreserveVideoMemoryAllocations=1
 options nvidia NVreg_RegistryDwords="EnableBrightnessControl=1"
-EOF
+MODCONF
 
-    # Blacklist nouveau
-    cat > /etc/modprobe.d/blacklist-nouveau.conf << 'EOF'
+cat > /etc/modules-load.d/nvidia.conf << 'MODLOAD'
+nvidia
+nvidia_drm
+nvidia_uvm
+nvidia_modeset
+MODLOAD
+
+# Blacklist nouveau
+echo "Blacklisting nouveau..." | tee -a "$NVIDIA_DETECT_LOG"
+cat > /etc/modprobe.d/blacklist-nouveau.conf << 'NOUVEAU'
 blacklist nouveau
 blacklist lbm-nouveau
 blacklist rivafb
@@ -98,112 +141,68 @@ blacklist rivatv
 options nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
-EOF
+NOUVEAU
 
-    # Configure X.org
-    mkdir -p /etc/X11/xorg.conf.d/
-    cat > /etc/X11/xorg.conf.d/10-nvidia.conf << 'EOF'
+# Configure X.org
+mkdir -p /etc/X11/xorg.conf.d/
+cat > /etc/X11/xorg.conf.d/10-nvidia.conf << 'XORG'
+Section "OutputClass"
+    Identifier "nvidia"
+    MatchDriver "nvidia-drm"
+    Driver "nvidia"
+    Option "AllowEmptyInitialConfiguration"
+    Option "PrimaryGPU" "yes"
+    ModulePath "/usr/lib/x86_64-linux-gnu/nvidia/xorg"
+EndSection
+
 Section "ServerLayout"
     Identifier "layout"
-    Screen 0 "nvidia"
+    Option "AllowNVIDIAGPUScreens"
 EndSection
 
 Section "Device"
     Identifier "nvidia"
     Driver "nvidia"
     Option "NoLogo" "true"
-    Option "UseEDID" "true"
-    Option "AllowEmptyInitialConfiguration" "true"
 EndSection
+XORG
 
-Section "Screen"
-    Identifier "nvidia"
-    Device "nvidia"
-    Option "AllowEmptyInitialConfiguration" "true"
-EndSection
+# Update initramfs
+update-initramfs -u
 
-Section "Module"
-    Load "modesetting"
-    Load "glx"
-EndSection
-EOF
-
-    # Create display setup script
-    cat > /usr/local/bin/setup-display << 'EOF'
-#!/bin/bash
-
-# Remove nouveau if loaded
-rmmod nouveau || true
-
-# Load NVIDIA kernel modules
-modprobe nvidia
-modprobe nvidia_drm
-modprobe nvidia_uvm
-modprobe nvidia_modeset
-
-# Wait for NVIDIA devices
-sleep 2
-
-# Configure displays
-xrandr --auto
-if ! xrandr | grep -q "connected"; then
-    xrandr --setprovideroutputsource modesetting NVIDIA-0
-    xrandr --auto
+# Configure GDM to use X11
+if [ -f /etc/gdm3/daemon.conf ]; then
+    sed -i 's/#WaylandEnable=false/WaylandEnable=false/' /etc/gdm3/daemon.conf
 fi
+
+# Try loading modules
+modprobe nvidia || true
+modprobe nvidia_drm || true
+modprobe nvidia_uvm || true
+modprobe nvidia_modeset || true
+
+echo "NVIDIA setup completed" | tee -a "$NVIDIA_DETECT_LOG"
 EOF
-    chmod +x /usr/local/bin/setup-display
 
-    # Update initramfs
-    update-initramfs -u -k all
+chmod +x /usr/local/bin/nvidia-live-setup
 
-    # Create systemd service for NVIDIA setup
-    cat > /etc/systemd/system/nvidia-setup.service << 'EOF'
+# Create systemd service for NVIDIA setup
+cat > /etc/systemd/system/nvidia-live-setup.service << 'EOF'
 [Unit]
-Description=NVIDIA display setup
+Description=NVIDIA Driver Setup
 Before=display-manager.service
 After=systemd-modules-load.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/setup-display
+ExecStart=/usr/local/bin/nvidia-live-setup
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # Enable the service
-    systemctl enable nvidia-setup
-
-    # Create X11 startup hook
-    mkdir -p /etc/X11/xinit/xinitrc.d
-    cat > /etc/X11/xinit/xinitrc.d/10-nvidia.sh << 'EOF'
-#!/bin/bash
-if [ -x /usr/local/bin/setup-display ]; then
-    /usr/local/bin/setup-display
-fi
-EOF
-    chmod +x /etc/X11/xinit/xinitrc.d/10-nvidia.sh
-
-    # Configure GDM to use X11
-    if [ -f /etc/gdm3/daemon.conf ]; then
-        sed -i 's/#WaylandEnable=false/WaylandEnable=false/' /etc/gdm3/daemon.conf
-    fi
-}
-
-# Add kernel modules to load at boot
-add_nvidia_modules() {
-    cat > /etc/modules-load.d/nvidia.conf << 'EOF'
-nvidia
-nvidia_drm
-nvidia_uvm
-nvidia_modeset
-EOF
-}
-
-# Run setup
-setup_nvidia
-add_nvidia_modules
+systemctl enable nvidia-live-setup
 
 # Configure GDM3
 cat > /etc/gdm3/custom.conf << 'GDM'
