@@ -13,39 +13,32 @@ MAGI aims to reimagine the desktop environment as an AI-augmented workspace wher
 - AI assists with task management and workflow optimization
 - Natural language can be used for system interaction
 - Intelligent context awareness enhances productivity
-- Privacy and user control remain paramount
+- Privacy via local models
+- Support for GTX 1060 or better
 
 ## Current Status: Early Prototype
 
-This is currently a **technical demo** that implements basic desktop environment functionality as a foundation for AI features. While the core desktop interface works, AI integration is still in development.
+This is currently a **technical demo** that implements basic desktop environment functionality as a foundation for AI features. While the core desktop interface works, full OS building is underway.
 
 ### What Works Now
 - Basic desktop shell with panels and window management
 - Workspace switching and window list
 - Application launcher and system tray
 - Session management and settings integration
+- Context-aware LLM integration
 
 ### Coming Soon
-- Local LLM integration for task assistance
-- Context-aware workspace management
 - Natural language command interface
-- AI-powered application launching
-- Intelligent window management
-- Privacy-focused user behavior learning
+- AI-powered agents
 
 ## Technical Foundation
-
 - **Shell**: Custom GTK3-based interface
 - **Backend**: Python with MATE components
-- **AI Plans**: 
-  - Local LLM integration
-  - Tensor processing support
-  - Custom AI middleware
-  - Privacy-preserving learning system
+- **LLM**: Ollama
 
 ## Try It Out
 
-While AI features are still in development, you can test the basic shell:
+While still in development, you can test the basic shell today on a Debian Bookworm base
 
 ```bash
 # Clone the repository
@@ -67,13 +60,12 @@ Edit `~/.config/magi/config.json` to customize basic settings. AI configuration 
 - [x] Basic desktop shell
 - [x] Window management
 - [x] Session handling
-- [ ] LLM integration framework
-- [ ] Context awareness system
-- [ ] Natural language processing
-- [ ] AI task assistance
-- [ ] Behavior learning
-- [ ] Privacy framework
-- [ ] User preference modeling
+- [x] LLM integration framework
+- [x] Context awareness system
+- [x] Natural language processing
+- [x] AI task assistance
+- [ ] OS build
+- [ ] Local Agent
 
 ## Contributing
 
@@ -84,24 +76,6 @@ MAGI is in experimental stages and we welcome:
 - Code contributions
 - Documentation help
 - Testing and feedback
-
-## Future Direction
-
-We're working toward:
-1. **Intelligent Task Management**
-   - Context-aware workspace organization
-   - Smart window placement
-   - Automated workflow optimization
-
-2. **Natural Interaction**
-   - Conversational system control
-   - Intent-based application launching
-   - Adaptive user interface
-
-3. **Privacy-First AI**
-   - Local-only processing
-   - User-controlled learning
-   - Transparent operation
 
 ## License
 
