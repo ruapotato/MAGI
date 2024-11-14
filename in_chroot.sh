@@ -38,6 +38,8 @@ apt-get install -y \
     python3-dev \
     python3-setuptools \
     python3-wheel \
+    python3-numpy \
+    xterm \
     libgirepository1.0-dev \
     pkg-config \
     libcairo2-dev \
@@ -58,6 +60,16 @@ apt-get install -y \
     network-manager-gnome \
     pulseaudio \
     pavucontrol
+
+# Install system-wide pip packages needed for core functionality
+pip3 install --break-system-packages \
+    sounddevice \
+    pynvml
+
+# Create required MAGI directories
+mkdir -p /tmp/MAGI
+touch /tmp/MAGI/current_context.txt
+chmod 777 /tmp/MAGI/current_context.txt
 
 # Create NVIDIA detection and setup script
 cat > /usr/local/bin/nvidia-live-setup << 'EOF'
@@ -209,8 +221,24 @@ cat > /etc/gdm3/custom.conf << 'GDM'
 [daemon]
 WaylandEnable=false
 DefaultSession=magi
-AutomaticLoginEnable=false
+AutomaticLoginEnable=true
+AutomaticLogin=magi
+InitialSetupEnable=false
 GDM
+
+# Create X11 startup script
+mkdir -p /etc/X11/xinit/xinitrc.d
+cat > /etc/X11/xinit/xinitrc.d/50-magi-startup << 'EOF'
+#!/bin/bash
+if ! pgrep gdm3 > /dev/null; then
+    sudo service gdm3 start
+fi
+
+if ! pgrep gdm3 > /dev/null; then
+    exec /opt/magi/start.sh
+fi
+EOF
+chmod +x /etc/X11/xinit/xinitrc.d/50-magi-startup
 
 # Set up Python environment
 python3 -m venv /opt/magi/ears_pyenv
@@ -301,11 +329,40 @@ Type=Application
 DesktopNames=MAGI
 DESKTOP
 
+# Create MAGI systemd service
+cat > /etc/systemd/system/magi-session.service << 'EOF'
+[Unit]
+Description=MAGI Session Service
+After=gdm3.service
+
+[Service]
+Type=simple
+ExecStart=/opt/magi/start.sh
+User=magi
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/magi/.Xauthority
+
+[Install]
+WantedBy=graphical.target
+EOF
+
+# Create magi user if it doesn't exist
+if ! id -u magi >/dev/null 2>&1; then
+    useradd -m -s /bin/bash magi
+    echo "magi:magi" | chpasswd
+    usermod -aG sudo magi
+fi
+
+# Set up proper permissions
+chown -R magi:magi /opt/magi
+chmod -R 755 /opt/magi
+
 # Enable services
 systemctl enable gdm3
 systemctl enable NetworkManager
 systemctl enable ollama
 systemctl enable magi-whisper
+systemctl enable magi-session
 
 # Clean up
 apt-get clean
