@@ -647,40 +647,6 @@ def draw_panel_background(widget, ctx):
     ctx.paint()
     return False
 
-
-def setup_styles():
-    css = b"""
-    button {
-        padding: 4px 8px;
-        border-radius: 4px;
-    }
-    
-    .monitor-label {
-        font-family: monospace;
-        padding: 0 4px;
-        min-width: 100px;
-        font-weight: 500;
-    }
-
-    .clock-label {
-        font-family: monospace;
-        padding: 0 4px;
-        min-width: 180px;
-        font-weight: 500;
-    }
-
-    .recording {
-        border: 2px solid #f7768e;
-    }
-    """
-    style_provider = Gtk.CssProvider()
-    style_provider.load_from_data(css)
-    Gtk.StyleContext.add_provider_for_screen(
-        Gdk.Screen.get_default(),
-        style_provider,
-        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-    )
-
 def main():
     # Check X11 first
     display = check_x11()
@@ -702,8 +668,6 @@ def main():
         print("Error: Could not initialize window manager connection")
         sys.exit(1)
     
-    # Set up CSS styles
-    setup_styles()
     
     # Set up panels
     global panels
