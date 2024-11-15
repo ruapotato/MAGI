@@ -462,138 +462,37 @@ class MessageBox(Gtk.Box):
 
 def setup_css():
     css = b"""
-    window {
-        background: linear-gradient(160deg, #1a1b26, #24283b);
-        border: 1px solid #7aa2f7;
-        border-radius: 12px;
-    }
-    
-    frame {
-        border: none;
-        background: none;
-    }
-    
-    scrolledwindow {
-        border: none;
-        background: none;
-    }
-    
-    viewport {
-        background: none;
-    }
-    
-    .user-message {
-        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
-        color: #1a1b26;
-        padding: 16px 20px;
-        border-radius: 24px 24px 4px 24px;
-        margin: 4px 200px 4px 0px;
-        font-size: 15px;
-        font-weight: 500;
-    }
-    
-    .user-message:hover {
-        margin-top: 2px;
-        margin-bottom: 6px;
-    }
-    
-    .assistant-message {
-        background: linear-gradient(135deg, #292e42, #343b58);
-        color: #c0caf5;
-        padding: 16px 20px;
-        border-radius: 24px 24px 24px 4px;
-        margin: 4px 0px 4px 200px;
-        font-size: 15px;
-        font-weight: 400;
-        border: 1px solid #3b4261;
-    }
-    
-    .assistant-message:hover {
-        margin-top: 2px;
-        margin-bottom: 6px;
-    }
-    
-    .code-block {
-        background-color: #000000;
-        color: #ffffff;
-        padding: 16px 20px;
-        border-radius: 12px;
-        margin: 4px 0px 4px 200px;
-        font-size: 15px;
-        font-weight: 400;
-        font-family: monospace;
-    }
-    
     entry {
-        background: #292e42;
-        color: #c0caf5;
-        border: 1px solid #3b4261;
-        border-radius: 12px;
-        padding: 8px 16px;
-        font-size: 15px;
-    }
-    
-    entry:focus {
-        border-color: #7aa2f7;
-        background: #2a3042;
+        border-radius: 4px;
+        padding: 8px;
+        margin: 2px;
     }
     
     button {
-        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
-        color: #1a1b26;
-        border: none;
-        border-radius: 12px;
-        padding: 8px 20px;
-        font-size: 15px;
-        font-weight: 600;
-    }
-    
-    button:hover {
-        background: linear-gradient(135deg, #88b0ff, #33d1ed);
-    }
-    
-    button:active {
-        padding-top: 9px;
-        padding-bottom: 7px;
-        background: linear-gradient(135deg, #6992e3, #29b2cc);
+        padding: 4px 8px;
+        border-radius: 4px;
     }
     
     .message-button {
-        background: none;
         padding: 4px;
         min-width: 24px;
         min-height: 24px;
-        opacity: 0.7;
     }
     
-    .message-button:hover {
-        opacity: 1;
-        background-color: #3b4261;
+    .code-block {
+        font-family: monospace;
+        padding: 8px;
+        margin: 4px 0px 4px 200px;
     }
     
-    .message-button image {
-        color: #c0caf5;
+    .user-message {
+        padding: 8px;
+        margin: 4px 200px 4px 0px;
     }
     
-    .toolbar-button {
-        background: linear-gradient(135deg, #7aa2f7, #2ac3de);
-        color: #1a1b26;
-        border: none;
-        border-radius: 12px;
-        padding: 6px 12px;
-    }
-    
-    .toolbar-button:hover {
-        background: linear-gradient(135deg, #88b0ff, #33d1ed);
-    }
-    
-    .toolbar-button:active {
-        background: linear-gradient(135deg, #6992e3, #29b2cc);
-    }
-    
-    .recording {
-        background-color: #f7768e;
-        border: 2px solid #ff99a3;
+    .assistant-message {
+        padding: 8px;
+        margin: 4px 0px 4px 200px;
     }
     """
     style_provider = Gtk.CssProvider()

@@ -513,49 +513,22 @@ def create_window_list():
     return box
 
 def create_panel(position='top'):
-    """Create GPU-accelerated panel with proper multi-monitor positioning"""
     window = Gtk.Window.new(Gtk.WindowType.TOPLEVEL)
     window.set_type_hint(Gdk.WindowTypeHint.DOCK)
-    window.set_visual(window.get_screen().get_rgba_visual())
-    os.environ['GDK_BACKEND'] = 'gl'
     
+    # Remove transparency-related settings
     window.set_decorated(False)
-    window.set_app_paintable(True)
     window.set_accept_focus(False)
     window.set_resizable(False)
     window.stick()
     window.set_keep_above(True)
     
     last_draw_time = 0
-    UPDATE_INTERVAL = 1.0  # 1 FPS
-    
-    def on_draw(widget, ctx):
-        nonlocal last_draw_time
-        current_time = time.time()
-        
-        if current_time - last_draw_time < UPDATE_INTERVAL:
-            return False
-            
-        last_draw_time = current_time
-        
-        # GPU-optimized drawing
-        ctx.set_operator(cairo.OPERATOR_SOURCE)
-        ctx.push_group()
-        ctx.set_source_rgba(0.10, 0.11, 0.15, 0.95)
-        ctx.paint()
-        ctx.pop_group_to_source()
-        ctx.paint()
-        return False
-    
-    def force_redraw(*args):
-        nonlocal last_draw_time
-        last_draw_time = 0
-        window.queue_draw()
+    UPDATE_INTERVAL = 1.0
     
     def update_geometry(*args):
         if hasattr(window, '_geometry_update_pending'):
             return False
-            
         window._geometry_update_pending = True
         
         def do_update():
@@ -567,6 +540,7 @@ def create_panel(position='top'):
                 
                 width = geometry.width // scale
                 height = config['panel_height']
+                extra_space = 8 if position == 'top' else 0
                 x = geometry.x // scale
                 
                 if position == 'top':
@@ -574,12 +548,9 @@ def create_panel(position='top'):
                 else:
                     y = (geometry.y + geometry.height) // scale - height
                     
-                # Block redrawing during updates
-                window.set_opacity(0)
                 window.move(x, y)
-                window.set_size_request(width, height)
-                window.resize(width, height)
-                window.set_opacity(1)
+                window.set_size_request(width, height + extra_space)
+                window.resize(width, height + extra_space)
                 
                 if window.get_window():
                     xid = window.get_window().get_xid()
@@ -587,7 +558,7 @@ def create_panel(position='top'):
                         subprocess.run(['xprop', '-id', str(xid),
                                       '-f', '_NET_WM_STRUT_PARTIAL', '32c',
                                       '-set', '_NET_WM_STRUT_PARTIAL',
-                                      f'0, 0, {height}, 0, 0, 0, 0, 0, {x}, {x + width}, 0, 0'])
+                                      f'0, 0, {height + extra_space}, 0, 0, 0, 0, 0, {x}, {x + width}, 0, 0'])
                     else:
                         subprocess.run(['xprop', '-id', str(xid),
                                       '-f', '_NET_WM_STRUT_PARTIAL', '32c',
@@ -596,13 +567,9 @@ def create_panel(position='top'):
             finally:
                 window._geometry_update_pending = False
             return False
-            
+        
         GLib.idle_add(do_update)
         return False
-    
-    window.connect('draw', on_draw)
-    window.connect('button-press-event', force_redraw)
-    window.connect('button-release-event', force_redraw)
     
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
     window.add(box)
@@ -684,63 +651,28 @@ def draw_panel_background(widget, ctx):
 def setup_styles():
     css = b"""
     button {
-        background: none;
-        color: #7aa2f7;
-        border: 1px solid #7aa2f7;
-        border-radius: 12px;
-        padding: 8px 20px;
-        font-size: 15px
+        padding: 4px 8px;
+        border-radius: 4px;
     }
-
-    button:hover {
-        border-color: #88b0ff;
-        color: #88b0ff
-    }
-
-    button:active {
-        border-color: #6992e3;
-        color: #6992e3
-    }
-
-    button image {
-        color: #7aa2f7
-    }
-
-    button:hover image {
-        color: #88b0ff
-    }
-
-    button:active image {
-        color: #6992e3
-    }
-
+    
     .monitor-label {
         font-family: monospace;
         padding: 0 4px;
         min-width: 100px;
-        color: #c0caf5;
         font-weight: 500;
-        text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
     }
 
     .clock-label {
-    font-family: monospace;
-    padding: 0 4px;
-    min-width: 180px;
-    color: #c0caf5;  /* Tokyo Night foreground color - a light blue-white */
-    font-weight: 500;  /* Medium weight for better visibility */
-    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);  /* Optional: adds a subtle shadow for better readability */
+        font-family: monospace;
+        padding: 0 4px;
+        min-width: 180px;
+        font-weight: 500;
     }
 
     .recording {
         border: 2px solid #f7768e;
-        background: none
     }
-
-    .recording image {
-        color: #f7768e
-    }
-"""
+    """
     style_provider = Gtk.CssProvider()
     style_provider.load_from_data(css)
     Gtk.StyleContext.add_provider_for_screen(
