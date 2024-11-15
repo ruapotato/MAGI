@@ -3,10 +3,12 @@
 # Get the script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-
-# Create log directories
+# Create log directories and context file
 mkdir -p "$HOME/.cache/magi/logs"
 mkdir -p "$HOME/.cache/magi/crash_reports"
+mkdir -p "/tmp/MAGI"
+touch "/tmp/MAGI/current_context.txt"
+chmod 666 "/tmp/MAGI/current_context.txt"
 
 # Kill any existing instances and wait for cleanup
 killall -9 mate-settings-daemon 2>/dev/null
@@ -161,6 +163,26 @@ if [ -x /usr/bin/mate-settings ]; then
     fi
 fi
 
+# Create default config if it doesn't exist
+mkdir -p "$HOME/.config/magi"
+CONFIG_FILE="$HOME/.config/magi/config.json"
+if [ ! -f "$CONFIG_FILE" ]; then
+    cat > "$CONFIG_FILE" << EOF
+{
+    "panel_height": 28,
+    "workspace_count": 4,
+    "enable_effects": true,
+    "enable_ai": true,
+    "terminal": "mate-terminal",
+    "launcher": "mate-panel --run-dialog",
+    "background": "/usr/share/magi/backgrounds/default.png",
+    "ollama_model": "mistral",
+    "whisper_endpoint": "http://localhost:5000/transcribe",
+    "sample_rate": 16000
+}
+EOF
+fi
+
 # Start GVFS
 /usr/lib/gvfs/gvfsd &
 /usr/lib/gvfs/gvfsd-fuse "$XDG_RUNTIME_DIR/gvfs" &
@@ -173,20 +195,19 @@ for i in {1..30}; do
     sleep 0.1
 done
 
-# Start compositing
-xcompmgr -c &
-
-# Ensure window manager is running
+# Ensure window manager is running first
 if ! pgrep marco >/dev/null; then
     marco --replace &
     sleep 2
 fi
 
+# Start compositing
+xcompmgr -c &
+
 # Start MATE Power Manager
 mate-power-manager &
 
 # Load config values
-CONFIG_FILE="$HOME/.config/magi/config.json"
 if [ -f "$CONFIG_FILE" ]; then
     while IFS="=" read -r key value; do
         if [ ! -z "$key" ]; then
@@ -213,6 +234,8 @@ fi
 # Start MAGI shell with crash handling
 start_magi_shell &
 
-# Bug workaround: Restart settings daemon after shell starts
+# Wait for shell to start
 sleep 3
+
+# Bug workaround: Restart settings daemon after shell starts
 mate-settings-daemon --replace
