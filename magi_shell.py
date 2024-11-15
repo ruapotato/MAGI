@@ -513,177 +513,165 @@ def create_window_list():
     return box
 
 def create_panel(position='top'):
-    """Create a panel window with struts and Tokyo Night theme"""
+    """Create GPU-accelerated panel with proper multi-monitor positioning"""
     window = Gtk.Window.new(Gtk.WindowType.TOPLEVEL)
     window.set_type_hint(Gdk.WindowTypeHint.DOCK)
+    window.set_visual(window.get_screen().get_rgba_visual())
+    os.environ['GDK_BACKEND'] = 'gl'
     
-    # Basic window setup
     window.set_decorated(False)
     window.set_app_paintable(True)
     window.set_accept_focus(False)
     window.set_resizable(False)
     window.stick()
     window.set_keep_above(True)
-
-    def draw_panel_background(widget, ctx):
-        """Draw panel background with Tokyo Night colors"""
-        ctx.set_source_rgba(0.10, 0.11, 0.15, 0.95)  # #1a1b26 with 0.95 alpha
+    
+    last_draw_time = 0
+    UPDATE_INTERVAL = 1.0  # 1 FPS
+    
+    def on_draw(widget, ctx):
+        nonlocal last_draw_time
+        current_time = time.time()
+        
+        if current_time - last_draw_time < UPDATE_INTERVAL:
+            return False
+            
+        last_draw_time = current_time
+        
+        # GPU-optimized drawing
         ctx.set_operator(cairo.OPERATOR_SOURCE)
+        ctx.push_group()
+        ctx.set_source_rgba(0.10, 0.11, 0.15, 0.95)
+        ctx.paint()
+        ctx.pop_group_to_source()
         ctx.paint()
         return False
     
-    def get_primary_monitor():
-        """Get the primary monitor with fallback logic"""
-        display = Gdk.Display.get_default()
-        
-        # First try getting primary monitor
-        primary = display.get_primary_monitor()
-        if primary:
-            return primary
-            
-        # If no primary monitor, try finding one marked as primary
-        n_monitors = display.get_n_monitors()
-        for i in range(n_monitors):
-            monitor = display.get_monitor(i)
-            if monitor.is_primary():
-                return monitor
-        
-        # If still no primary monitor found, check which one has 0,0 coordinates
-        for i in range(n_monitors):
-            monitor = display.get_monitor(i)
-            geometry = monitor.get_geometry()
-            if geometry.x == 0 and geometry.y == 0:
-                return monitor
-        
-        # Last resort: return first monitor
-        return display.get_monitor(0)
+    def force_redraw(*args):
+        nonlocal last_draw_time
+        last_draw_time = 0
+        window.queue_draw()
     
-    def set_struts():
-        """Set window struts using xprop"""
-        if not window.get_window():
-            return False
-            
-        monitor = get_primary_monitor()
-        geometry = monitor.get_geometry()
-        
-        width = geometry.width
-        height = config['panel_height']
-        x_offset = geometry.x
-        
-        # Add padding for top panel
-        if position == 'top':
-            strut_height = height + 15
-        else:
-            strut_height = height
-        
-        try:
-            xid = window.get_window().get_xid()
-            
-            # Set basic struts relative to monitor position
-            if position == 'top':
-                subprocess.run(['xprop', '-id', str(xid), 
-                              '-f', '_NET_WM_STRUT', '32c',
-                              '-set', '_NET_WM_STRUT',
-                              f'0, 0, {strut_height}, 0'], check=True)
-                
-                partial_strut = f'0, 0, {strut_height}, 0, ' + \
-                              f'0, 0, 0, 0, ' + \
-                              f'{x_offset}, {x_offset + width}, 0, 0'
-            else:
-                subprocess.run(['xprop', '-id', str(xid),
-                              '-f', '_NET_WM_STRUT', '32c',
-                              '-set', '_NET_WM_STRUT',
-                              f'0, 0, 0, {strut_height}'], check=True)
-                
-                partial_strut = f'0, 0, 0, {strut_height}, ' + \
-                              f'0, 0, 0, 0, ' + \
-                              f'0, 0, {x_offset}, {x_offset + width}'
-            
-            # Set partial struts
-            subprocess.run(['xprop', '-id', str(xid),
-                          '-f', '_NET_WM_STRUT_PARTIAL', '32c',
-                          '-set', '_NET_WM_STRUT_PARTIAL',
-                          partial_strut], check=True)
-            
-        except Exception as e:
-            print(f"Error setting struts: {e}")
-            return False
-        return True
-
     def update_geometry(*args):
-        """Update panel position and size based on primary monitor"""
-        monitor = get_primary_monitor()
-        geometry = monitor.get_geometry()
-        scale_factor = monitor.get_scale_factor()
+        if hasattr(window, '_geometry_update_pending'):
+            return False
+            
+        window._geometry_update_pending = True
         
-        # Apply scale factor to dimensions
-        width = geometry.width // scale_factor
-        height = config['panel_height']
-        x_offset = geometry.x // scale_factor
-        y_offset = geometry.y // scale_factor
-        
-        if position == 'top':
-            window.move(x_offset, y_offset)
-        else:
-            window.move(x_offset, y_offset + (geometry.height // scale_factor) - height)
-        
-        window.set_size_request(width, height)
-        window.resize(width, height)
-        
-        # Set struts after geometry is updated
-        GLib.idle_add(set_struts)
+        def do_update():
+            try:
+                display = Gdk.Display.get_default()
+                primary = display.get_primary_monitor()
+                geometry = primary.get_geometry()
+                scale = primary.get_scale_factor()
+                
+                width = geometry.width // scale
+                height = config['panel_height']
+                x = geometry.x // scale
+                
+                if position == 'top':
+                    y = geometry.y // scale
+                else:
+                    y = (geometry.y + geometry.height) // scale - height
+                    
+                # Block redrawing during updates
+                window.set_opacity(0)
+                window.move(x, y)
+                window.set_size_request(width, height)
+                window.resize(width, height)
+                window.set_opacity(1)
+                
+                if window.get_window():
+                    xid = window.get_window().get_xid()
+                    if position == 'top':
+                        subprocess.run(['xprop', '-id', str(xid),
+                                      '-f', '_NET_WM_STRUT_PARTIAL', '32c',
+                                      '-set', '_NET_WM_STRUT_PARTIAL',
+                                      f'0, 0, {height}, 0, 0, 0, 0, 0, {x}, {x + width}, 0, 0'])
+                    else:
+                        subprocess.run(['xprop', '-id', str(xid),
+                                      '-f', '_NET_WM_STRUT_PARTIAL', '32c',
+                                      '-set', '_NET_WM_STRUT_PARTIAL',
+                                      f'0, 0, 0, {height}, 0, 0, 0, 0, 0, 0, {x}, {x + width}'])
+            finally:
+                window._geometry_update_pending = False
+            return False
+            
+        GLib.idle_add(do_update)
         return False
-
-    # Set up monitor change detection using screen signals
-    def on_screen_changed(screen, *args):
-        GLib.idle_add(update_geometry)
     
-    def on_monitors_changed(display, *args):
-        GLib.idle_add(update_geometry)
+    window.connect('draw', on_draw)
+    window.connect('button-press-event', force_redraw)
+    window.connect('button-release-event', force_redraw)
     
-    # Connect to both screen and display signals for maximum compatibility
-    screen = window.get_screen()
-    screen.connect('monitors-changed', on_screen_changed)
-    
-    display = Gdk.Display.get_default()
-    display.connect('monitor-added', on_monitors_changed)
-    display.connect('monitor-removed', on_monitors_changed)
-    
-    # Also poll periodically for changes
-    def check_monitor_changes():
-        static_data = getattr(window, '_monitor_data', None)
-        monitor = get_primary_monitor()
-        geometry = monitor.get_geometry()
-        current_data = (geometry.x, geometry.y, geometry.width, geometry.height)
-        
-        if static_data != current_data:
-            window._monitor_data = current_data
-            update_geometry()
-        return True
-    
-    GLib.timeout_add(2000, check_monitor_changes)
-    
-    # Set up visual for transparency
-    visual = screen.get_rgba_visual()
-    if visual and screen.is_composited():
-        window.set_visual(visual)
-    
-    # Create content box
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
     window.add(box)
     
-    # Connect signals
-    window.connect('draw', draw_panel_background)
-    window.connect('realize', lambda w: GLib.idle_add(update_geometry))
-    
-    # Show the panel
-    box.show_all()
-    window.show_all()
-    
-    # Initial geometry setup
-    GLib.idle_add(update_geometry)
+    GLib.timeout_add(1000, update_geometry)
+    display = Gdk.Display.get_default()
+    display.connect('monitor-added', update_geometry)
+    display.connect('monitor-removed', update_geometry)
     
     return window, box
+
+def setup_panels():
+    """Initialize panel layout with performance optimizations"""
+    global panels
+    
+    if panels:
+        print("Warning: Panels already initialized")
+        return panels
+    
+    # Initialize NVIDIA for GPU monitoring
+    try:
+        nvmlInit()
+        nvidia_handle = nvmlDeviceGetHandleByIndex(0)
+    except Exception as e:
+        print(f"NVIDIA init error: {e}")
+        nvidia_handle = None
+    
+    # Create panels
+    top_panel, top_box = create_panel('top')
+    bottom_panel, bottom_box = create_panel('bottom')
+    
+    # Create and pack top panel components
+    components = {
+        'launcher': create_launcher_button(),
+        'workspace': create_workspace_switcher(),
+        'windows': create_window_list(),
+        'monitor': create_system_monitor(),
+        'network': create_network_button(),
+        'clock': create_clock()
+    }
+    
+    # Block redraws during component addition
+    top_panel.set_opacity(0)
+    top_box.pack_start(components['launcher'], False, False, 0)
+    top_box.pack_start(components['workspace'], False, False, 2)
+    top_box.pack_start(components['windows'], True, True, 0)
+    top_box.pack_end(components['monitor'], False, False, 2)
+    top_box.pack_end(components['network'], False, False, 2)
+    top_box.pack_end(components['clock'], False, False, 5)
+    top_panel.set_opacity(1)
+    
+    # Create and pack bottom panel components
+    center_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+    llm_button = create_llm_interface_button()
+    tts_button = create_tts_button()
+    voice_button = create_voice_input()
+    
+    bottom_panel.set_opacity(0)
+    bottom_box.pack_start(center_box, True, True, 0)
+    center_box.set_center_widget(llm_button)
+    bottom_box.pack_end(tts_button, False, False, 2)
+    bottom_box.pack_end(voice_button, False, False, 2)
+    bottom_panel.set_opacity(1)
+    
+    top_panel.show_all()
+    bottom_panel.show_all()
+    
+    panels = {'top': top_panel, 'bottom': bottom_panel}
+    return panels
 
 def draw_panel_background(widget, ctx):
     """Draw panel background with Tokyo Night colors"""
@@ -692,62 +680,6 @@ def draw_panel_background(widget, ctx):
     ctx.paint()
     return False
 
-def setup_panels():
-    """Initialize panel layout"""
-    global panels
-    
-    # Create top panel
-    top_panel, top_box = create_panel('top')
-    
-    # Add launcher button
-    launcher = create_launcher_button()
-    top_box.pack_start(launcher, False, False, 0)
-    
-    # Add workspace switcher to top
-    workspace_switcher = create_workspace_switcher()
-    top_box.pack_start(workspace_switcher, False, False, 2)
-    
-    # Add window list
-    window_list = create_window_list()
-    top_box.pack_start(window_list, True, True, 0)
-    
-    # Add system monitor
-    sys_monitor = create_system_monitor()
-    top_box.pack_end(sys_monitor, False, False, 2)
-    
-    # Add network button
-    network_btn = create_network_button()
-    top_box.pack_end(network_btn, False, False, 2)
-    
-    # Add clock
-    clock = create_clock()
-    top_box.pack_end(clock, False, False, 5)
-    
-    # Create bottom panel
-    bottom_panel, bottom_box = create_panel('bottom')
-    
-    # Create a container for centered content
-    center_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-    bottom_box.pack_start(center_box, True, True, 0)
-    
-    # Add LLM interface button centered
-    llm_button = create_llm_interface_button()
-    center_box.set_center_widget(llm_button)
-    
-    # Add TTS button
-    tts_button = create_tts_button()
-    bottom_box.pack_end(tts_button, False, False, 2)
-    
-    # Add voice input button
-    voice_button = create_voice_input()
-    bottom_box.pack_end(voice_button, False, False, 2)
-    
-    # Show panels
-    top_panel.show_all()
-    bottom_panel.show_all()
-    
-    panels = {'top': top_panel, 'bottom': bottom_panel}
-    return panels
 
 def setup_styles():
     css = b"""
