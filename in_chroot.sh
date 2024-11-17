@@ -297,8 +297,11 @@ WantedBy=multi-user.target
 SERVICE
 
 # Pull Mistral model
-systemctl start ollama
-ollama pull mistral
+echo "running ollama"
+/usr/local/bin/ollama serve &
+sleep 10
+echo "pulling mistral"
+/usr/local/bin/ollama pull mistral
 
 # Create MAGI service
 cat > /etc/systemd/system/magi-whisper.service << 'SERVICE'
