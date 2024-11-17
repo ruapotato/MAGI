@@ -296,13 +296,37 @@ RestartSec=3
 WantedBy=multi-user.target
 SERVICE
 
-# Pull Mistral model
-echo "running ollama"
-/usr/local/bin/ollama serve &
-sleep 10
-echo "pulling mistral"
-/usr/local/bin/ollama pull mistral
-systemctl stop ollama
+# Pull Mistral model in a controlled way
+(
+    echo "Starting Ollama service temporarily..."
+    /usr/local/bin/ollama serve &
+    OLLAMA_PID=$!
+    
+    # Wait for service to be ready
+    for i in {1..30}; do
+        if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+    
+    echo "Pulling Mistral model..."
+    /usr/local/bin/ollama pull mistral
+    
+    echo "Stopping temporary Ollama service..."
+    kill $OLLAMA_PID
+    wait $OLLAMA_PID 2>/dev/null || true
+    
+    # Make sure no Ollama processes are left
+    pkill -f ollama || true
+    sleep 1
+    pkill -9 -f ollama || true
+) || true
+
+# Clean up any remaining Ollama processes to be absolutely certain
+pkill -f ollama || true
+sleep 1
+pkill -9 -f ollama || true
 
 # Create MAGI service
 cat > /etc/systemd/system/magi-whisper.service << 'SERVICE'

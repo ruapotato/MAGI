@@ -84,6 +84,9 @@ start_magi_shell() {
     done
 }
 
+# Start ollama
+nohup ollama run mistral > "$HOME/.cache/magi/logs/mistral.log" 2>&1 &
+
 # Start Whisper server if not already running
 if ! pgrep -f "python.*server.py" > /dev/null; then
     echo "Starting Whisper server..."

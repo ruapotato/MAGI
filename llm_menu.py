@@ -661,65 +661,9 @@ def position_window(window):
     
     window.move(x, y)
 
-
-def check_ollama_model():
-    """Check if Ollama is running and model is loaded, start if needed"""
-    try:
-        # Check if Ollama is responding
-        response = requests.get('http://localhost:11434/api/tags')
-        if response.ok:
-            models = response.json().get('models', [])
-            if any(model['name'] == 'mistral' for model in models):
-                return True
-    except requests.exceptions.RequestException:
-        print("Ollama not running, attempting to start service...")
-        
-        try:
-            # Start ollama via systemctl, which will handle privilege escalation
-            subprocess.run(['systemctl', 'restart', 'ollama'], check=True)
-            
-            # Wait for service to be available
-            for _ in range(30):  # 30 second timeout
-                try:
-                    time.sleep(1)
-                    response = requests.get('http://localhost:11434/api/tags')
-                    if response.ok:
-                        # Check if mistral model is loaded
-                        models = response.json().get('models', [])
-                        if not any(model['name'] == 'mistral' for model in models):
-                            print("Loading mistral model...")
-                            subprocess.run(['ollama', 'pull', 'mistral'], check=True)
-                        return True
-                except requests.exceptions.RequestException:
-                    continue
-            
-            print("Timeout waiting for Ollama to start")
-            return False
-            
-        except Exception as e:
-            print(f"Error starting Ollama: {e}")
-            return False
-    
-    return True
-
 def main():
     # Create /tmp/MAGI if it doesn't exist
     os.makedirs('/tmp/MAGI', exist_ok=True)
-    
-    # Check Ollama status before proceeding
-    if not check_ollama_model():
-        dialog = Gtk.MessageDialog(
-            flags=0,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK,
-            text="Ollama Service Not Running"
-        )
-        dialog.format_secondary_text(
-            "The Ollama service failed to start. Please try again."
-        )
-        dialog.run()
-        dialog.destroy()
-        return
     
     # Set up the UI
     window = MainWindow()
