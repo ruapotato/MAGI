@@ -302,6 +302,7 @@ echo "running ollama"
 sleep 10
 echo "pulling mistral"
 /usr/local/bin/ollama pull mistral
+systemctl stop ollama
 
 # Create MAGI service
 cat > /etc/systemd/system/magi-whisper.service << 'SERVICE'
