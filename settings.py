@@ -26,67 +26,72 @@ class MAGISettings(Adw.Application):
         self.stop_audio_monitor()
     
     def on_activate(self, app):
-        # Create window
+        """Initialize the main window with proper layout"""
+        # Create window with proper titlebar
         self.win = Adw.ApplicationWindow(application=app)
-        self.win.set_default_size(800, 600)
-        self.win.set_title("MAGI Settings")
+        self.win.set_default_size(1024, 768)
+        self.win.maximize()
         
-        # Create main box that expands to fill window
+        # Create main layout box
+        main_layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        main_layout.set_hexpand(True)
+        main_layout.set_vexpand(True)
+        
+        # Add header bar
+        header = Adw.HeaderBar()
+        header.set_title_widget(Gtk.Label(label="MAGI Settings"))
+        main_layout.append(header)
+        
+        # Main content box
         main_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         main_box.set_hexpand(True)
         main_box.set_vexpand(True)
-        self.win.set_content(main_box)
+        main_layout.append(main_box)
         
-        # Create leaflet that expands to fill box
-        leaflet = Adw.Leaflet()
-        leaflet.set_can_unfold(True)
-        leaflet.set_hexpand(True)
-        leaflet.set_vexpand(True)
-        main_box.append(leaflet)
+        # Create split view for adaptive layout
+        self.split_view = Adw.Leaflet()
+        self.split_view.set_can_unfold(True)
+        self.split_view.set_hexpand(True)
+        self.split_view.set_vexpand(True)
+        main_box.append(self.split_view)
         
-        # Create sidebar box
+        # Sidebar
         sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         sidebar_box.set_size_request(200, -1)
         
-        # Sidebar header
-        header = Adw.HeaderBar()
-        sidebar_box.append(header)
-        
         # Sidebar list
-        sidebar = Gtk.ListBox(css_classes=['navigation-sidebar'])
-        sidebar.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        sidebar.connect('row-selected', self.on_sidebar_select)
-        sidebar_box.append(sidebar)
+        self.sidebar = Gtk.ListBox(css_classes=['navigation-sidebar'])
+        self.sidebar.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.sidebar.connect('row-selected', self.on_sidebar_select)
+        sidebar_box.append(self.sidebar)
         
-        # Content box
+        # Content area with full width
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content_box.set_hexpand(True)
+        content_box.set_vexpand(True)
         
-        # Content header
-        content_header = Adw.HeaderBar()
-        content_box.append(content_header)
-        
-        # Content stack
+        # Stack for content pages
         self.stack = Gtk.Stack()
+        self.stack.set_hexpand(True)
+        self.stack.set_vexpand(True)
         self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         content_box.append(self.stack)
         
-        # Add pages
-        self.add_page("General", self.create_general_page(), "preferences-desktop-symbolic", sidebar)
-        self.add_page("Audio", self.create_audio_page(), "audio-card-symbolic", sidebar)
-        self.add_page("AI", self.create_ai_page(), "preferences-system-symbolic", sidebar)
-        self.add_page("Appearance", self.create_appearance_page(), "preferences-desktop-theme-symbolic", sidebar)
+        # Add content pages
+        self.add_page("General", self.create_general_page(), "preferences-desktop-symbolic")
+        self.add_page("Audio", self.create_audio_page(), "audio-card-symbolic")
+        self.add_page("AI", self.create_ai_page(), "preferences-system-symbolic")
+        self.add_page("Appearance", self.create_appearance_page(), "preferences-desktop-theme-symbolic")
         
-        # Add boxes to leaflet
-        leaflet.append(sidebar_box)
-        leaflet.append(content_box)
-        
-        # Set folded properties
-        sidebar_box.set_hexpand(False)
-        content_box.set_hexpand(True)
+        # Add boxes to split view
+        self.split_view.append(sidebar_box)
+        self.split_view.append(content_box)
         
         # Select first item
-        sidebar.select_row(sidebar.get_row_at_index(0))
+        self.sidebar.select_row(self.sidebar.get_row_at_index(0))
         
+        # Set the main layout as window content
+        self.win.set_content(main_layout)
         self.win.present()
     
     def on_sidebar_select(self, listbox, row):
@@ -95,9 +100,9 @@ class MAGISettings(Adw.Application):
             page_name = row.get_child().get_last_child().get_text().lower()
             self.stack.set_visible_child_name(page_name)
     
-    def add_page(self, title, content, icon_name, sidebar):
-        """Add a page to the stack and an item to the sidebar"""
-        # Create sidebar item with proper layout
+    def add_page(self, title, content, icon_name):
+        """Add a page to the stack and sidebar with proper layout"""
+        # Create sidebar item
         row = Gtk.ListBoxRow()
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         box.set_margin_start(12)
@@ -106,32 +111,54 @@ class MAGISettings(Adw.Application):
         box.set_margin_bottom(8)
         row.set_child(box)
         
-        # Create icon using new GTK4 method
         icon = Gtk.Image()
         icon.set_from_icon_name(icon_name)
-        icon.set_icon_size(Gtk.IconSize.NORMAL)
-        
         label = Gtk.Label(label=title)
         label.set_xalign(0)
         
         box.append(icon)
         box.append(label)
         
-        sidebar.append(row)
+        self.sidebar.append(row)
         
-        # Add page to stack with proper margins
-        self.stack.add_named(content, title.lower())
+        # Create full-width container for the content
+        content_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        content_container.set_hexpand(True)
+        content_container.set_vexpand(True)
+        
+        # Center the content with appropriate margins
+        margin_start = Gtk.Box()
+        margin_start.set_hexpand(True)
+        margin_end = Gtk.Box()
+        margin_end.set_hexpand(True)
+        
         content.set_margin_start(24)
         content.set_margin_end(24)
         content.set_margin_top(24)
         content.set_margin_bottom(24)
+        content.set_hexpand(True)  # Make content expand horizontally
+        
+        # Pack content with flexible margins
+        content_container.append(margin_start)
+        content_container.append(content)
+        content_container.append(margin_end)
+        
+        # Add to stack
+        self.stack.add_named(content_container, title.lower())
     
     def create_general_page(self):
-        """Create general settings page"""
+        """Create general settings page with full width layout"""
+        clamp = Adw.Clamp()
+        
         page = Adw.PreferencesPage()
+        page.set_hexpand(True)
+        page.set_vexpand(True)
         
         # Panel settings group
-        panel_group = Adw.PreferencesGroup(title="Panel Settings")
+        panel_group = Adw.PreferencesGroup(
+            title="Panel Settings",
+            description="Configure the appearance and behavior of the panels"
+        )
         page.add(panel_group)
         
         # Panel height
@@ -141,41 +168,104 @@ class MAGISettings(Adw.Application):
         )
         height_spin = Gtk.SpinButton.new_with_range(24, 48, 2)
         height_spin.set_value(self.config.get('panel_height', 28))
+        height_spin.set_valign(Gtk.Align.CENTER)
         height_spin.connect('value-changed', self.on_panel_height_changed)
         height_row.add_suffix(height_spin)
         panel_group.add(height_row)
         
         # Workspace settings group
-        workspace_group = Adw.PreferencesGroup(title="Workspace Settings")
+        workspace_group = Adw.PreferencesGroup(
+            title="Workspace Settings",
+            description="Configure virtual workspace behavior"
+        )
         page.add(workspace_group)
         
         # Workspace count
         workspace_row = Adw.ActionRow(
             title="Workspace Count",
-            subtitle="Number of virtual desktops"
+            subtitle="Number of virtual desktops available"
         )
         workspace_spin = Gtk.SpinButton.new_with_range(1, 10, 1)
         workspace_spin.set_value(self.config.get('workspace_count', 4))
+        workspace_spin.set_valign(Gtk.Align.CENTER)
         workspace_spin.connect('value-changed', self.on_workspace_count_changed)
         workspace_row.add_suffix(workspace_spin)
         workspace_group.add(workspace_row)
         
-        # Terminal settings group
-        terminal_group = Adw.PreferencesGroup(title="Terminal Settings")
-        page.add(terminal_group)
+        # Application settings group
+        app_group = Adw.PreferencesGroup(
+            title="Application Settings",
+            description="Configure default applications and launchers"
+        )
+        page.add(app_group)
         
         # Terminal command
         terminal_row = Adw.ActionRow(
             title="Terminal Command",
-            subtitle="Command used to launch the terminal"
+            subtitle="Command used to launch the terminal application"
         )
         terminal_entry = Gtk.Entry()
         terminal_entry.set_text(self.config.get('terminal', 'mate-terminal'))
+        terminal_entry.set_valign(Gtk.Align.CENTER)
+        terminal_entry.set_hexpand(True)
         terminal_entry.connect('changed', self.on_terminal_changed)
         terminal_row.add_suffix(terminal_entry)
-        terminal_group.add(terminal_row)
+        app_group.add(terminal_row)
         
-        return page
+        # Launcher command
+        launcher_row = Adw.ActionRow(
+            title="Launcher Command",
+            subtitle="Command used to show the application launcher"
+        )
+        launcher_entry = Gtk.Entry()
+        launcher_entry.set_text(self.config.get('launcher', 'mate-panel --run-dialog'))
+        launcher_entry.set_valign(Gtk.Align.CENTER)
+        launcher_entry.set_hexpand(True)
+        launcher_entry.connect('changed', self.on_launcher_changed)
+        launcher_row.add_suffix(launcher_entry)
+        app_group.add(launcher_row)
+        
+        # System settings group
+        system_group = Adw.PreferencesGroup(
+            title="System Settings",
+            description="Configure system-wide behavior"
+        )
+        page.add(system_group)
+        
+        # Startup delay
+        startup_row = Adw.ActionRow(
+            title="Startup Delay",
+            subtitle="Delay in seconds before starting background services"
+        )
+        startup_spin = Gtk.SpinButton.new_with_range(0, 10, 1)
+        startup_spin.set_value(self.config.get('startup_delay', 2))
+        startup_spin.set_valign(Gtk.Align.CENTER)
+        startup_spin.connect('value-changed', self.on_startup_delay_changed)
+        startup_row.add_suffix(startup_spin)
+        system_group.add(startup_row)
+        
+        clamp.set_child(page)
+        return clamp
+    
+    def on_terminal_changed(self, entry):
+        self.config['terminal'] = entry.get_text()
+        self.save_config()
+    
+    def on_launcher_changed(self, entry):
+        self.config['launcher'] = entry.get_text()
+        self.save_config()
+    
+    def on_startup_delay_changed(self, spin):
+        self.config['startup_delay'] = spin.get_value_as_int()
+        self.save_config()
+    
+    def on_panel_height_changed(self, spin):
+        self.config['panel_height'] = spin.get_value_as_int()
+        self.save_config()
+    
+    def on_workspace_count_changed(self, spin):
+        self.config['workspace_count'] = spin.get_value_as_int()
+        self.save_config()
     
     def create_audio_page(self):
         """Create audio settings page with proper settings loading"""
@@ -333,9 +423,10 @@ class MAGISettings(Adw.Application):
         return page
     
     def create_appearance_page(self):
-        """Create appearance settings page"""
+        """Create appearance settings page with live theme preview"""
         page = Adw.PreferencesPage()
-        page.set_hexpand(True)  # Make page expand horizontally
+        page.set_hexpand(True)
+        page.set_vexpand(True)
         
         # Theme settings group
         theme_group = Adw.PreferencesGroup(title="Theme Settings")
@@ -349,22 +440,20 @@ class MAGISettings(Adw.Application):
         
         # Get available themes
         theme_store = Gtk.StringList()
-        themes = self.get_available_themes()
+        self.themes = self.get_available_themes()
         current_theme = self.config.get('gtk_theme', 'Default')
         
         theme_store.append("Default (System)")
         selected_idx = 0
         
-        for i, theme in enumerate(themes, 1):
+        for i, theme in enumerate(self.themes, 1):
             theme_store.append(theme)
             if theme == current_theme:
                 selected_idx = i
         
         theme_row.set_model(theme_store)
         theme_row.set_selected(selected_idx)
-        
-        theme_row.connect('notify::selected', 
-                         lambda r,p: self.on_theme_changed(r, ['Default'] + themes))
+        theme_row.connect('notify::selected', self.on_theme_changed)
         theme_group.add(theme_row)
         
         return page
@@ -384,8 +473,8 @@ class MAGISettings(Adw.Application):
                     theme_dir = os.path.join(path, theme)
                     if os.path.isdir(theme_dir):
                         # Check for any GTK theme files
-                        if any(os.path.exists(os.path.join(theme_dir, f'gtk-{ver}'))
-                              for ver in ['2.0', '3.0', '4.0']):
+                        if any(os.path.exists(os.path.join(theme_dir, d)) 
+                              for d in ['gtk-3.0', 'gtk-4.0']):
                             themes.add(theme)
         
         return sorted(list(themes))
@@ -803,19 +892,31 @@ class MAGISettings(Adw.Application):
         self.config['enable_effects'] = switch.get_active()
         self.save_config()
     
-    def on_theme_changed(self, row, themes):
-        theme = themes[row.get_selected()]
-        self.config['gtk_theme'] = theme
+    def on_theme_changed(self, row, _):
+        """Handle theme selection with immediate preview"""
+        selected = row.get_selected()
+        theme_name = "Default"
+        
+        if selected > 0:  # First item is "Default"
+            theme_name = self.themes[selected - 1]
+        
+        # Apply theme immediately
+        settings = Gtk.Settings.get_default()
+        if theme_name == "Default":
+            # Use system theme
+            if Adw.StyleManager.get_default().get_system_supports_color_schemes():
+                settings.set_property('gtk-theme-name', None)
+            else:
+                settings.set_property('gtk-theme-name', 'Adwaita')
+        else:
+            settings.set_property('gtk-theme-name', theme_name)
+        
+        # Save to config
+        self.config['gtk_theme'] = theme_name
         self.save_config()
         
-        # Apply theme
-        if theme == 'Default':
-            Gtk.Settings.get_default().set_property(
-                'gtk-theme-name', 
-                Adw.StyleManager.get_default().get_system_supports_color_schemes()
-            )
-        else:
-            Gtk.Settings.get_default().set_property('gtk-theme-name', theme)
+        # Force window redraw
+        self.win.queue_draw()
     
     def save_config(self, config=None):
         """Save configuration to file"""
