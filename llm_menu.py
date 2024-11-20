@@ -84,6 +84,11 @@ class MessageBox(Gtk.Box):
             delete_btn = Gtk.Button.new_from_icon_name("edit-delete-symbolic")
             delete_btn.connect('clicked', self.on_delete_clicked)
             button_box.append(delete_btn)
+        
+        # Update button styling
+        for button in button_box:
+            button.add_css_class('message-button')
+            button.set_has_frame(False)  # Remove button borders
     
     def on_edit_clicked(self, button):
         text = self.label.get_text()
@@ -125,6 +130,19 @@ class MainWindow(Adw.ApplicationWindow):
         
         self.setup_window()
     
+    def setup_position(self):
+        """Position window at the center of the screen"""
+        display = self.get_display()
+        monitor = display.get_primary_monitor()
+        if monitor:
+            geometry = monitor.get_geometry()
+            window_width, window_height = self.get_default_size()
+            x = geometry.x + (geometry.width - window_width) // 2
+            y = geometry.y + (geometry.height - window_height) // 2
+            self.set_default_size(window_width, window_height)
+            self.set_size_request(window_width, window_height)
+            #self.set_gravity(Gdk.Gravity.CENTER)
+    
     def setup_window(self):
         self.set_title("MAGI Assistant")
         self.set_default_size(800, 600)
@@ -149,17 +167,41 @@ class MainWindow(Adw.ApplicationWindow):
         self.entry = Gtk.Entry()
         self.entry.set_hexpand(True)
         
-        send_button = Gtk.Button(label="Send")
-        send_button.add_css_class('suggested-action')
+        self.send_button = Gtk.Button(label="Send")
+        self.send_button.add_css_class('suggested-action')
         
         input_box.append(self.entry)
-        input_box.append(send_button)
+        input_box.append(self.send_button)
         
         # Pack everything
         main_box.append(scroll)
         main_box.append(input_box)
         
         self.set_content(main_box)
+        
+        # Focus handling
+        focus_controller = Gtk.EventControllerFocus.new()
+        focus_controller.connect('leave', self.on_focus_lost)
+        self.add_controller(focus_controller)
+
+        # Position window
+        GLib.timeout_add(50, self.setup_position)  # Short delay to ensure window is ready
+
+        # Connect signals
+        self.entry.connect('activate', self.on_send)
+        self.send_button.connect('clicked', self.on_send)
+        
+        # Load history
+        self.load_history()
+        
+        # Setup keyboard shortcuts
+        key_controller = Gtk.EventControllerKey.new()
+        key_controller.connect('key-pressed', self.on_key_pressed)
+        self.add_controller(key_controller)
+
+    def on_focus_lost(self, controller):
+        """Close window when focus is lost"""
+        self.close()
         
         # Connect signals
         self.entry.connect('activate', self.on_send)
@@ -291,53 +333,6 @@ class MAGIApplication(Adw.Application):
         super().__init__(application_id='com.test.app')
     
     def do_activate(self):
-        # Load CSS for styling
-        css_provider = Gtk.CssProvider()
-        css_data = '''
-            .user-message {
-                background: alpha(@accent_bg_color, 0.2);
-                color: @accent_fg_color;
-                padding: 16px 20px;
-                border-radius: 24px 24px 4px 24px;
-                margin: 4px 200px 4px 0px;
-            }
-            
-            .assistant-message {
-                background: alpha(@card_bg_color, 0.5);
-                color: @card_fg_color;
-                padding: 16px 20px;
-                border-radius: 24px 24px 24px 4px;
-                margin: 4px 0px 4px 200px;
-            }
-            
-            .code-block {
-                background-color: @window_bg_color;
-                color: @window_fg_color;
-                padding: 16px 20px;
-                border-radius: 12px;
-                margin: 4px 0px 4px 200px;
-                font-family: monospace;
-                border: 1px solid @borders;
-            }
-            
-            .message-button {
-                padding: 4px;
-                min-width: 24px;
-                min-height: 24px;
-                opacity: 0.7;
-            }
-            
-            .message-button:hover {
-                opacity: 1;
-            }
-        '''
-        css_provider.load_from_data(css_data.encode())
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(),
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
-        
         win = MainWindow(self)
         win.present()
 
