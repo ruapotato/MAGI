@@ -428,9 +428,12 @@ class MAGISettings(Adw.Application):
         page.set_hexpand(True)
         page.set_vexpand(True)
         
+        # Add toast overlay for notifications
+        self.toast_overlay = Adw.ToastOverlay()
+        self.toast_overlay.set_vexpand(True)
+        
         # Theme settings group
         theme_group = Adw.PreferencesGroup(title="Theme Settings")
-        page.add(theme_group)
         
         # Theme selection
         theme_row = Adw.ComboRow(
@@ -456,10 +459,27 @@ class MAGISettings(Adw.Application):
         theme_row.connect('notify::selected', self.on_theme_changed)
         theme_group.add(theme_row)
         
-        return page
+        # Add warning about theme switching
+        warning_group = Adw.PreferencesGroup()
+        warning_row = Adw.ActionRow(
+            title="Note: Some theme changes may require logging out to fully apply",
+            subtitle="Immediate changes will be visible in newly opened windows"
+        )
+        warning_group.add(warning_row)
+        
+        page.add(theme_group)
+        page.add(warning_group)
+        
+        self.toast_overlay.set_child(page)
+        return self.toast_overlay
     
+    def _show_window_after_theme_change(self):
+        """Helper to show window after brief delay to allow theme to apply"""
+        self.win.show()
+        return False
+
     def get_available_themes(self):
-        """Get list of installed GTK themes"""
+        """Get list of installed GTK themes with validation"""
         themes = set()
         theme_paths = [
             os.path.expanduser('~/.themes'),
@@ -472,9 +492,11 @@ class MAGISettings(Adw.Application):
                 for theme in os.listdir(path):
                     theme_dir = os.path.join(path, theme)
                     if os.path.isdir(theme_dir):
-                        # Check for any GTK theme files
-                        if any(os.path.exists(os.path.join(theme_dir, d)) 
-                              for d in ['gtk-3.0', 'gtk-4.0']):
+                        # Check for theme files in order of preference
+                        if (os.path.exists(os.path.join(theme_dir, 'gtk-4.0', 'gtk.css')) or
+                            os.path.exists(os.path.join(theme_dir, 'gtk-3.0', 'gtk.css')) or
+                            os.path.exists(os.path.join(theme_dir, 'gtk-3.0', 'gtk-main.css')) or
+                            os.path.exists(os.path.join(theme_dir, 'gtk-2.0', 'gtkrc'))):
                             themes.add(theme)
         
         return sorted(list(themes))
@@ -893,30 +915,59 @@ class MAGISettings(Adw.Application):
         self.save_config()
     
     def on_theme_changed(self, row, _):
-        """Handle theme selection with immediate preview"""
+        """Handle theme selection with proper system-wide application"""
         selected = row.get_selected()
         theme_name = "Default"
         
         if selected > 0:  # First item is "Default"
             theme_name = self.themes[selected - 1]
         
-        # Apply theme immediately
+        # Update GTK settings
         settings = Gtk.Settings.get_default()
+        
         if theme_name == "Default":
             # Use system theme
-            if Adw.StyleManager.get_default().get_system_supports_color_schemes():
-                settings.set_property('gtk-theme-name', None)
-            else:
-                settings.set_property('gtk-theme-name', 'Adwaita')
+            settings.reset_property('gtk-theme-name')
+            # Reset in gsettings
+            interface_settings = Gio.Settings.new('org.mate.interface')
+            interface_settings.reset('gtk-theme')
         else:
+            # Set theme directly
             settings.set_property('gtk-theme-name', theme_name)
+            
+            # Update MATE interface settings
+            interface_settings = Gio.Settings.new('org.mate.interface')
+            interface_settings.set_string('gtk-theme', theme_name)
+            
+            # Update mate-settings-daemon configuration
+            marco_settings = Gio.Settings.new('org.mate.Marco.general')
+            marco_settings.set_string('theme', theme_name)
+        
+        # Update xsettings directly via dconf
+        try:
+            subprocess.run([
+                'dconf', 'write', '/org/mate/desktop/interface/gtk-theme',
+                f"'{theme_name}'"
+            ], check=False)
+        except Exception as e:
+            print(f"Warning: Could not update dconf settings: {e}")
         
         # Save to config
         self.config['gtk_theme'] = theme_name
         self.save_config()
         
-        # Force window redraw
-        self.win.queue_draw()
+        # Give the system a moment to apply the theme
+        def apply_theme():
+            # Force our window to redraw
+            self.win.queue_draw()
+            # Show a notification about theme change
+            if hasattr(self, 'toast_overlay'):
+                toast = Adw.Toast.new(f"Theme changed to {theme_name}")
+                toast.set_timeout(2)
+                self.toast_overlay.add_toast(toast)
+            return False
+        
+        GLib.timeout_add(100, apply_theme)
     
     def save_config(self, config=None):
         """Save configuration to file"""
