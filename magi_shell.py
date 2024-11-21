@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
 
-
-import struct
-import array
 import gi
-gi.require_version('Gtk', '3.0')
-gi.require_version('Wnck', '3.0')
-from gi.repository import Gtk, Gdk, Wnck, GLib, GObject
+gi.require_version('Gtk', '4.0')
+gi.require_version('Adw', '1')
+gi.require_version('Gdk', '4.0')
+from gi.repository import Gtk, Adw, Gdk, GLib, Gio
 import json
 import os
 import subprocess
 import time
 import sys
-import cairo
 import psutil
 import threading
 import requests
@@ -20,26 +17,200 @@ import numpy as np
 import sounddevice as sd
 from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlDeviceGetUtilizationRates
 
+# Enable GPU acceleration
+os.environ['GDK_BACKEND'] = 'gl'
+
 # Global state
 windows = {}
 ai_predictions = {}
 panels = {}
 config = None
-recording = False
-audio_data = []
 
 # Performance optimizations
 MONITOR_CHECK_INTERVAL = 5000  # Reduce monitor polling to 5 seconds
 SYSTEM_STATS_INTERVAL = 3000   # Reduce system stats updates to 3 seconds
 CLOCK_UPDATE_INTERVAL = 1000   # Keep clock at 1 second for accuracy
 
-def check_x11():
-    """Ensure we have a valid X11 connection"""
-    display = Gdk.Display.get_default()
-    if not display:
-        print("Error: Cannot connect to X display")
-        sys.exit(1)
-    return display
+
+class WorkspaceSwitcher(Gtk.Box):
+    """Workspace switcher widget for GTK4"""
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
+        
+        self.workspace_buttons = []
+        self.current_workspace = 0
+        
+        # Create workspace buttons
+        for i in range(config['workspace_count']):
+            button = Gtk.Button(label=str(i + 1))
+            button.connect('clicked', self.switch_workspace, i)
+            self.append(button)
+            self.workspace_buttons.append(button)
+        
+        # Monitor workspace changes using wmctrl
+        GLib.timeout_add(500, self.update_current_workspace)
+        self.update_current_workspace()
+    
+    def switch_workspace(self, button, workspace_num):
+        """Switch to specified workspace using wmctrl"""
+        try:
+            subprocess.run(['wmctrl', '-s', str(workspace_num)])
+        except Exception as e:
+            print(f"Error switching workspace: {e}")
+    
+    def update_current_workspace(self):
+        """Update current workspace indicator"""
+        try:
+            output = subprocess.check_output(['wmctrl', '-d']).decode()
+            for line in output.splitlines():
+                if '*' in line:
+                    workspace = int(line.split()[0])
+                    if workspace != self.current_workspace:
+                        self.current_workspace = workspace
+                        self._update_buttons()
+                    break
+        except Exception as e:
+            print(f"Error updating workspace: {e}")
+        return True
+    
+    def _update_buttons(self):
+        """Update button styles based on current workspace"""
+        for i, button in enumerate(self.workspace_buttons):
+            if i == self.current_workspace:
+                button.add_css_class('active-workspace')
+            else:
+                button.remove_css_class('active-workspace')
+
+class WindowList(Gtk.Box):
+    """Window list widget for GTK4"""
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
+        self.set_hexpand(True)
+        
+        self.window_buttons = {}
+        self.current_workspace = 0
+        
+        # Start window monitoring
+        GLib.timeout_add(500, self.update_window_list)
+    
+    def update_window_list(self):
+        """Update window list using wmctrl"""
+        try:
+            # Get current workspace
+            workspace_output = subprocess.check_output(['wmctrl', '-d']).decode()
+            for line in workspace_output.splitlines():
+                if '*' in line:
+                    self.current_workspace = int(line.split()[0])
+                    break
+            
+            # Get window list
+            window_output = subprocess.check_output(['wmctrl', '-l']).decode()
+            current_windows = set()
+            
+            for line in window_output.splitlines():
+                parts = line.split(None, 3)
+                if len(parts) >= 4:
+                    window_id = parts[0]
+                    workspace = int(parts[1])
+                    title = parts[3]
+                    
+                    # Skip panels and other system windows
+                    if "MAGI" in title or "Desktop" in title:
+                        continue
+                    
+                    # Only show windows from current workspace
+                    if workspace == self.current_workspace or workspace == -1:  # -1 means sticky
+                        current_windows.add(window_id)
+                        if window_id not in self.window_buttons:
+                            button = Gtk.Button(label=title[:30])
+                            button.connect('clicked', self.activate_window, window_id)
+                            self.append(button)
+                            self.window_buttons[window_id] = button
+                        else:
+                            self.window_buttons[window_id].set_label(title[:30])
+            
+            # Remove buttons for closed windows
+            for window_id in list(self.window_buttons.keys()):
+                if window_id not in current_windows:
+                    self.remove(self.window_buttons[window_id])
+                    del self.window_buttons[window_id]
+            
+        except Exception as e:
+            print(f"Error updating window list: {e}")
+        
+        return True
+    
+    def activate_window(self, button, window_id):
+        """Activate clicked window"""
+        try:
+            subprocess.run(['wmctrl', '-ia', window_id])
+        except Exception as e:
+            print(f"Error activating window: {e}")
+
+class SystemMonitor(Gtk.Box):
+    """System monitor widget using GTK4"""
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        
+        # Use a single label for all stats to reduce widget count
+        self.stats_label = Gtk.Label()
+        self.stats_label.add_css_class('monitor-label')
+        self.append(self.stats_label)
+        
+        # Initialize NVIDIA monitoring
+        self.nvidia_available = False
+        try:
+            nvmlInit()
+            self.nvidia_handle = nvmlDeviceGetHandleByIndex(0)
+            self.nvidia_available = True
+        except:
+            print("Warning: NVIDIA GPU monitoring not available")
+        
+        # Cached psutil CPU percent
+        self.cpu_percent = psutil.cpu_percent(interval=None)
+        self.last_cpu_update = time.time()
+        
+        # Start updates
+        self.update_stats()
+        GLib.timeout_add(SYSTEM_STATS_INTERVAL, self.update_stats)
+    
+    def update_stats(self):
+        """Update system statistics"""
+        try:
+            # Update CPU less frequently
+            current_time = time.time()
+            if current_time - self.last_cpu_update >= 1:
+                self.cpu_percent = psutil.cpu_percent(interval=None)
+                self.last_cpu_update = current_time
+            
+            # Get memory usage
+            mem = psutil.virtual_memory()
+            ram_percent = mem.percent
+            
+            # Get GPU stats if available
+            if self.nvidia_available:
+                try:
+                    util = nvmlDeviceGetUtilizationRates(self.nvidia_handle)
+                    mem = nvmlDeviceGetMemoryInfo(self.nvidia_handle)
+                    gpu_percent = util.gpu
+                    vram_percent = (mem.used / mem.total) * 100
+                except:
+                    gpu_percent = vram_percent = 0
+            else:
+                gpu_percent = vram_percent = 0
+            
+            # Update all stats in a single label update
+            stats_text = f"CPU: {self.cpu_percent:>5.1f}% | RAM: {ram_percent:>5.1f}%"
+            if self.nvidia_available:
+                stats_text += f" | GPU: {gpu_percent:>5.1f}% | VRAM: {vram_percent:>5.1f}%"
+            
+            self.stats_label.set_label(stats_text)
+            
+        except Exception as e:
+            print(f"Error updating stats: {e}")
+        
+        return True  # Continue updating
+
 
 def load_config():
     """Load configuration from JSON file"""
@@ -69,624 +240,423 @@ def load_config():
         except Exception as e:
             print(f"Warning: Could not save config: {e}")
 
-def create_system_monitor():
-    """Create optimized system monitor widget"""
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-    
-    # Use a single label for all stats to reduce widget count
-    stats_label = Gtk.Label()
-    stats_label.get_style_context().add_class('monitor-label')
-    box.pack_start(stats_label, False, False, 2)
-    
-    # Initialize NVIDIA monitoring
-    nvidia_available = False
-    try:
-        nvmlInit()
-        nvidia_handle = nvmlDeviceGetHandleByIndex(0)
-        nvidia_available = True
-    except:
-        print("Warning: NVIDIA GPU monitoring not available")
-    
-    # Cached psutil CPU percent
-    cpu_percent = psutil.cpu_percent()
-    last_cpu_update = time.time()
-    
-    def update_stats():
-        nonlocal cpu_percent, last_cpu_update
-        try:
-            # Update CPU less frequently
-            current_time = time.time()
-            if current_time - last_cpu_update >= 1:  # Update CPU every second
-                cpu_percent = psutil.cpu_percent()
-                last_cpu_update = current_time
-            
-            ram_percent = psutil.virtual_memory().percent
-            
-            if nvidia_available:
-                try:
-                    util = nvmlDeviceGetUtilizationRates(nvidia_handle)
-                    mem = nvmlDeviceGetMemoryInfo(nvidia_handle)
-                    gpu_percent = util.gpu
-                    vram_percent = (mem.used / mem.total) * 100
-                except:
-                    gpu_percent = vram_percent = 0
-            else:
-                gpu_percent = vram_percent = 0
-            
-            # Update all stats in a single label update
-            stats_label.set_text(
-                f"CPU: {cpu_percent:>5.1f}% | RAM: {ram_percent:>5.1f}% | "
-                f"GPU: {gpu_percent:>5.1f}% | VRAM: {vram_percent:>5.1f}%"
-            )
-            
-        except Exception as e:
-            print(f"Error updating stats: {e}")
+class VoiceInputButton(Gtk.Button):
+    """Voice input button using the same implementation as llm_menu"""
+    def __init__(self):
+        super().__init__()
+        self.stream = None
+        self.record_start_time = 0
+        self.recording = False
+        self.is_transcribing = False
+        self.audio_data = []
         
-        return True
+        # Create icons
+        self.mic_icon = Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic")
+        self.record_icon = Gtk.Image.new_from_icon_name("media-record-symbolic")
+        self.set_child(self.mic_icon)
+        
+        # Setup click gesture
+        click = Gtk.GestureClick.new()
+        click.connect('begin', self.start_recording)
+        click.connect('end', self.stop_recording)
+        self.add_controller(click)
     
-    update_stats()
-    GLib.timeout_add(SYSTEM_STATS_INTERVAL, update_stats)
-    return box
-
-def create_network_button():
-    """Create network manager button"""
-    button = Gtk.Button()
-    button.set_relief(Gtk.ReliefStyle.NONE)
-    icon = Gtk.Image.new_from_icon_name("network-wireless-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
-    button.add(icon)
-    button.connect('clicked', lambda w: subprocess.Popen(['nm-connection-editor']))
-    return button
-
-def create_clock():
-    """Create optimized clock widget"""
-    label = Gtk.Label()
-    label.get_style_context().add_class('clock-label')
-    
-    # Pre-calculate format string
-    format_str = "%Y-%m-%d %H:%M:%S"
-    
-    def update_clock():
-        try:
-            label.set_text(time.strftime(format_str))
-            return True
-        except:
-            return False
-    
-    update_clock()
-    GLib.timeout_add(CLOCK_UPDATE_INTERVAL, update_clock)
-    return label
-
-def create_llm_interface_button():
-    """Create context-aware LLM button that launches menu"""
-    button = Gtk.Button()
-    button.set_relief(Gtk.ReliefStyle.NONE)
-    context_label = Gtk.Label("Ask anything...")
-    button.add(context_label)
-    
-    # Keep track of the current window and selection state
-    current_state = {
-        'window_name': None,
-        'has_selection': False,
-        'last_selection': None
-    }
-    
-    def handle_window_change(window_name):
-        """Handle window context changes"""
-        # Ignore the MAGI Assistant window
-        if window_name == "MAGI Assistant":
+    def start_recording(self, gesture, sequence):
+        if self.is_transcribing:
             return
             
-        current_state['window_name'] = window_name
-        current_state['has_selection'] = False
-        current_state['last_selection'] = None
-        context_label.set_text(f"Ask anything about {window_name}...")
-        
-        # Save window context
-        os.makedirs('/tmp/MAGI', exist_ok=True)
-        with open('/tmp/MAGI/current_context.txt', 'w') as f:
-            f.write(f"Context: User is working with {window_name}")
-    
-    def handle_selection_change(window_name, selected_text):
-        """Handle selection changes within the same window"""
-        # Ignore the MAGI Assistant window
-        if window_name == "MAGI Assistant":
-            return
+        print("Starting recording...")
+        self.recording = True
+        if self.stream:
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except:
+                pass
+            self.stream = None
             
-        if (window_name == current_state['window_name'] and 
-            selected_text and 
-            selected_text != current_state['last_selection']):
-            current_state['has_selection'] = True
-            current_state['last_selection'] = selected_text
-            context_label.set_text("Ask anything about your selection...")
-            
-            # Save selection context
-            with open('/tmp/MAGI/current_context.txt', 'w') as f:
-                f.write(f"Context: User has selected the following text in {window_name}:\n{selected_text}")
-    
-    def update_context(*args):
-        """Update context and save to file"""
-        screen = Wnck.Screen.get_default()
-        active_window = screen.get_active_window()
-        
-        if active_window:
-            window_name = active_window.get_name()
-            
-            # Check if window changed
-            if window_name != current_state['window_name']:
-                handle_window_change(window_name)
-            else:
-                # Only check selection if we're in the same window
-                clipboard = Gtk.Clipboard.get(Gdk.SELECTION_PRIMARY)
-                selected_text = clipboard.wait_for_text()
-                handle_selection_change(window_name, selected_text)
-        else:
-            current_state['window_name'] = None
-            current_state['has_selection'] = False
-            current_state['last_selection'] = None
-            context_label.set_text("Ask anything...")
-            
-            # Clear context
-            with open('/tmp/MAGI/current_context.txt', 'w') as f:
-                f.write("")
-    
-    def on_button_clicked(widget):
-        # Launch the menu app without updating context
-        subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), 'llm_menu.py')])
-    
-    button.connect('clicked', on_button_clicked)
-    
-    # Monitor active window changes
-    screen = Wnck.Screen.get_default()
-    screen.connect('active-window-changed', update_context)
-    
-    # Monitor clipboard for selection changes
-    clipboard = Gtk.Clipboard.get(Gdk.SELECTION_PRIMARY)
-    clipboard.connect('owner-change', update_context)
-    
-    # Initialize context
-    update_context()
-    
-    return button
-
-def create_tts_button():
-    """Create text-to-speech button"""
-    button = Gtk.Button()
-    button.set_relief(Gtk.ReliefStyle.NONE)
-    icon = Gtk.Image.new_from_icon_name("audio-speakers-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
-    button.add(icon)
-    
-    def speak_selection(*args):
-        try:
-            # Get clipboard contents
-            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_PRIMARY)
-            text = clipboard.wait_for_text()
-            if text:
-                subprocess.Popen(['espeak', text])
-        except Exception as e:
-            print(f"TTS Error: {e}")
-    
-    button.connect('clicked', speak_selection)
-    return button
-
-def create_voice_input():
-    """Create voice input button that sends to Whisper server"""
-    button = Gtk.Button()
-    button.set_relief(Gtk.ReliefStyle.NONE)
-    stream = None
-    record_start_time = 0
-    recording = False
-    
-    # Create icons
-    mic_icon = Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
-    record_icon = Gtk.Image.new_from_icon_name("media-record-symbolic", Gtk.IconSize.SMALL_TOOLBAR)
-    button.add(mic_icon)
-    
-    def start_recording(*args):
-        nonlocal stream, record_start_time, recording
-        audio_data.clear()
-        record_start_time = time.time()
-        recording = True
+        self.audio_data = []
+        self.record_start_time = time.time()
         
         # Swap to record icon
-        button.remove(button.get_child())
-        button.add(record_icon)
-        button.show_all()
+        self.set_child(self.record_icon)
         
-        def audio_callback(indata, frames, time, status):
-            nonlocal recording
-            if recording:
-                audio_data.append(indata.copy())
+        def audio_callback(indata, *args):
+            if self.recording:
+                self.audio_data.append(indata.copy())
         
         try:
-            stream = sd.InputStream(
+            self.stream = sd.InputStream(
                 callback=audio_callback,
                 channels=1,
                 samplerate=16000,
                 blocksize=1024,
                 dtype=np.float32
             )
-            stream.start()
-            GLib.idle_add(lambda: button.get_style_context().add_class('recording'))
-            print("DEBUG: Recording stream started")
+            self.stream.start()
+            print("Recording stream started successfully")
+            self.add_css_class('recording')
         except Exception as e:
             print(f"Recording Error: {e}")
-            recording = False
-            GLib.idle_add(lambda: button.get_style_context().remove_class('recording'))
-            # Swap back to mic icon
-            button.remove(button.get_child())
-            button.add(mic_icon)
-            button.show_all()
+            self.recording = False
+            self.set_child(self.mic_icon)
     
-    def stop_recording(*args):
-        nonlocal stream, record_start_time, recording
-        print("DEBUG: Stopping recording")
-        recording = False
-        recording_duration = time.time() - record_start_time
-        
-        # Swap back to mic icon
-        button.remove(button.get_child())
-        button.add(mic_icon)
-        button.show_all()
-        
-        try:
-            if stream:
-                stream.stop()
-                stream.close()
-                stream = None
-            GLib.idle_add(lambda: button.get_style_context().remove_class('recording'))
+    def stop_recording(self, gesture, sequence):
+        if self.is_transcribing:
+            return
             
-            # Check if the recording was too short
-            if recording_duration < 0.5:
-                print("DEBUG: Recording too short, playing help message")
-                subprocess.Popen(['espeak', "Press and hold to record audio"])
-                return
-            
-            if audio_data:
-                print(f"DEBUG: Got {len(audio_data)} chunks of audio data")
-                audio = np.concatenate(audio_data)
-                print(f"DEBUG: Concatenated audio shape: {audio.shape}")
+        print("Stopping recording...")
+        self.recording = False
+        recording_duration = time.time() - self.record_start_time
+        
+        # Stop recording first
+        if self.stream:
+            try:
+                self.stream.stop()
+                self.stream.close()
+                self.stream = None
+            except Exception as e:
+                print(f"Error stopping recording: {e}")
+        
+        # Reset button state
+        self.set_child(self.mic_icon)
+        self.remove_css_class('recording')
+        
+        # Handle short recordings
+        if recording_duration < 0.5:
+            print("Recording too short")
+            subprocess.run(['espeak', "Press and hold to record audio"])
+            return
+        
+        # Process audio
+        if self.audio_data:
+            try:
+                print("Processing audio...")
+                self.is_transcribing = True
+                self.set_sensitive(False)
+                
+                # Create a copy of audio data
+                audio_data = np.concatenate(self.audio_data.copy())
+                self.audio_data = []
                 
                 def transcribe():
                     try:
-                        print("DEBUG: Starting transcription request")
-                        files = {'audio': ('audio.wav', audio.tobytes())}
+                        print("Sending to whisper...")
+                        files = {'audio': ('audio.wav', audio_data.tobytes())}
                         response = requests.post('http://localhost:5000/transcribe', files=files)
-                        print(f"DEBUG: Got response status {response.status_code}")
                         
-                        if response.ok:
-                            text = response.json().get('transcription', '')
-                            print(f"DEBUG: Got transcription: {text}")
-                            subprocess.run(['xdotool', 'type', text], check=True)
-                            print("DEBUG: Typed transcription")
-                        else:
-                            print(f"Server Error: {response.status_code}")
-                    except Exception as e:
-                        print(f"Transcription Error: {e}")
-                        import traceback
-                        traceback.print_exc()
-                
-                threading.Thread(target=transcribe, daemon=True).start()
-            else:
-                print("DEBUG: No audio data collected")
-                
-        except Exception as e:
-            print(f"Audio Processing Error: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            GLib.idle_add(lambda: button.get_style_context().remove_class('recording'))
-    
-    button.connect('pressed', start_recording)
-    button.connect('released', stop_recording)
-    
-    return button
-
-def create_launcher_button():
-    """Create the main menu button"""
-    button = Gtk.Button(label=" MAGI ")
-    button.connect('clicked', lambda w: launch_menu())
-    button.get_style_context().add_class('launcher-button')
-    return button
-
-def launch_menu():
-    """Launch the application menu"""
-    try:
-        subprocess.Popen(config['launcher'].split())
-    except Exception as e:
-        print(f"Error launching menu: {e}")
-
-def create_workspace_switcher():
-    """Create optimized workspace switcher"""
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
-    screen = Wnck.Screen.get_default()
-    screen.force_update()
-    
-    # Cache for workspace state
-    workspace_cache = {'count': 0, 'active': None}
-    
-    def update_workspaces(*args):
-        try:
-            active_space = screen.get_active_workspace()
-            workspace_count = screen.get_workspace_count()
-            
-            # Check if anything changed
-            if (workspace_count == workspace_cache['count'] and 
-                active_space == workspace_cache['active']):
-                return
-            
-            workspace_cache['count'] = workspace_count
-            workspace_cache['active'] = active_space
-            
-            for child in box.get_children():
-                box.remove(child)
-            
-            for i in range(workspace_count):
-                workspace = screen.get_workspace(i)
-                button = Gtk.Button(label=str(i + 1))
-                if workspace and workspace == active_space:
-                    button.get_style_context().add_class('active-workspace')
-                button.connect('clicked', lambda w, num=i: switch_to_workspace(num))
-                box.pack_start(button, False, False, 0)
-            
-            box.show_all()
-            
-        except Exception as e:
-            print(f"Error updating workspaces: {e}")
-    
-    screen.connect('workspace-created', update_workspaces)
-    screen.connect('workspace-destroyed', update_workspaces)
-    screen.connect('active-workspace-changed', update_workspaces)
-    
-    update_workspaces()
-    return box
-
-def switch_to_workspace(num):
-    """Switch to a specific workspace"""
-    screen = Wnck.Screen.get_default()
-    workspace = screen.get_workspace(num)
-    if workspace:
-        workspace.activate(GLib.get_current_time())
-
-def create_window_list():
-    """Create optimized window list"""
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
-    screen = Wnck.Screen.get_default()
-    screen.force_update()
-    
-    # Cache for window titles
-    title_cache = {}
-    
-    def update_window_list(*args):
-        # Only update if the box is visible
-        if not box.get_visible():
-            return
-        
-        try:
-            current_workspace = screen.get_active_workspace()
-            
-            # Get windows efficiently
-            windows = [
-                win for win in screen.get_windows() 
-                if not win.is_skip_tasklist() and 
-                (win.get_workspace() == current_workspace or win.is_pinned())
-            ]
-            
-            # Calculate max width once
-            max_chars = max(10, min(30, int(80 / max(1, len(windows)))))
-            
-            # Remove old buttons
-            for child in box.get_children():
-                box.remove(child)
-            
-            # Update window buttons
-            for window in windows:
-                window_id = window.get_xid()
-                
-                # Check title cache
-                current_title = window.get_name()
-                if window_id not in title_cache or title_cache[window_id] != current_title:
-                    title_cache[window_id] = current_title
-                    if len(current_title) > max_chars:
-                        title_cache[window_id] = current_title[:max_chars-3] + "..."
-                
-                button = Gtk.Button(label=title_cache[window_id])
-                
-                if window.is_active():
-                    button.get_style_context().add_class('active-window')
-                
-                button.connect('clicked', lambda w, win=window: win.activate(GLib.get_current_time()))
-                box.pack_start(button, False, False, 0)
-            
-            box.show_all()
-            
-        except Exception as e:
-            print(f"Error updating window list: {e}")
-    
-    # Optimize event connections
-    screen.connect('window-opened', update_window_list)
-    screen.connect('window-closed', update_window_list)
-    screen.connect('active-window-changed', update_window_list)
-    screen.connect('active-workspace-changed', update_window_list)
-    
-    # Initial update
-    GLib.idle_add(update_window_list)
-    return box
-
-def create_panel(position='top'):
-    window = Gtk.Window.new(Gtk.WindowType.TOPLEVEL)
-    window.set_type_hint(Gdk.WindowTypeHint.DOCK)
-    
-    # Remove transparency-related settings
-    window.set_decorated(False)
-    window.set_accept_focus(False)
-    window.set_resizable(False)
-    window.stick()
-    window.set_keep_above(True)
-    
-    last_draw_time = 0
-    UPDATE_INTERVAL = 1.0
-    
-    def update_geometry(*args):
-        if hasattr(window, '_geometry_update_pending'):
-            return False
-        window._geometry_update_pending = True
-        
-        def do_update():
-            try:
-                display = Gdk.Display.get_default()
-                primary = display.get_primary_monitor()
-                geometry = primary.get_geometry()
-                scale = primary.get_scale_factor()
-                
-                width = geometry.width // scale
-                height = config['panel_height']
-                extra_space = 8 if position == 'top' else 0
-                x = geometry.x // scale
-                
-                if position == 'top':
-                    y = geometry.y // scale
-                else:
-                    y = (geometry.y + geometry.height) // scale - height
+                        def handle_response():
+                            self.is_transcribing = False
+                            self.set_sensitive(True)
+                            
+                            if response.ok:
+                                text = response.json().get('transcription', '')
+                                if text:
+                                    subprocess.run(['xdotool', 'type', text])
+                            else:
+                                print(f"Transcription error: {response.status_code}")
+                        
+                        GLib.idle_add(handle_response)
                     
-                window.move(x, y)
-                window.set_size_request(width, height + extra_space)
-                window.resize(width, height + extra_space)
+                    except Exception as e:
+                        print(f"Transcription error: {e}")
+                        GLib.idle_add(lambda: setattr(self, 'is_transcribing', False))
+                        GLib.idle_add(lambda: self.set_sensitive(True))
                 
-                if window.get_window():
-                    xid = window.get_window().get_xid()
-                    if position == 'top':
-                        subprocess.run(['xprop', '-id', str(xid),
-                                      '-f', '_NET_WM_STRUT_PARTIAL', '32c',
-                                      '-set', '_NET_WM_STRUT_PARTIAL',
-                                      f'0, 0, {height + extra_space}, 0, 0, 0, 0, 0, {x}, {x + width}, 0, 0'])
-                    else:
-                        subprocess.run(['xprop', '-id', str(xid),
-                                      '-f', '_NET_WM_STRUT_PARTIAL', '32c',
-                                      '-set', '_NET_WM_STRUT_PARTIAL',
-                                      f'0, 0, 0, {height}, 0, 0, 0, 0, 0, 0, {x}, {x + width}'])
-            finally:
-                window._geometry_update_pending = False
-            return False
+                # Start transcription in background
+                threading.Thread(target=transcribe, daemon=True).start()
+                
+            except Exception as e:
+                print(f"Audio processing error: {e}")
+                self.is_transcribing = False
+                self.set_sensitive(True)
+
+class MAGIPanel(Gtk.ApplicationWindow):
+    """Main panel window using GTK4"""
+    def __init__(self, app, position='top', **kwargs):
+        super().__init__(**kwargs)
         
-        GLib.idle_add(do_update)
+        # Set application
+        self.set_application(app)
+        
+        self.position = position
+        self.set_title(f"MAGI Panel ({position})")
+        
+        # Set window properties for panel behavior
+        self.set_decorated(False)
+        self.set_resizable(False)
+        
+        # Main box
+        self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self.set_child(self.box)
+        
+        if position == 'top':
+            self.setup_top_panel()
+        else:
+            self.setup_bottom_panel()
+        
+        # Initial geometry setup
+        self.initial_geometry_setup()
+        
+        # Connect map signal instead of realize
+        self.connect('map', self.on_map)
+        
+        # Monitor geometry changes less frequently
+        GLib.timeout_add(2000, self.update_geometry)
+        
+    def initial_geometry_setup(self):
+        """Set initial geometry before window is realized"""
+        display = self.get_display()
+        monitor = display.get_monitors()[0]  # Get first monitor initially
+        
+        geometry = monitor.get_geometry()
+        scale = monitor.get_scale_factor()
+        
+        # Calculate panel dimensions
+        width = geometry.width
+        height = config['panel_height'] * scale
+        
+        # Set initial size
+        self.set_size_request(width, height)
+        self.set_default_size(width, height)
+        
+    def on_map(self, widget):
+        """Handle window mapping"""
+        # Give the window a moment to be fully mapped
+        GLib.timeout_add(100, self.delayed_window_setup)
+    
+    
+    def delayed_window_setup(self):
+        """Set up window properties after it's mapped"""
+        try:
+            # First try getting window by PID
+            pid = os.getpid()
+            window_id = None
+            
+            try:
+                output = subprocess.check_output(['xdotool', 'search', '--pid', str(pid), '--class', 'Gtk4Window']).decode().strip()
+                if output:
+                    window_ids = output.split('\n')
+                    # Try to match by geometry to find our panel
+                    for wid in window_ids:
+                        try:
+                            info = subprocess.check_output(['xwininfo', '-id', wid]).decode()
+                            if f"MAGI Panel ({self.position})" in info:
+                                window_id = wid
+                                break
+                        except:
+                            continue
+            except Exception as e:
+                print(f"Error finding window by PID: {e}")
+            
+            # Fallback to title search if PID method failed
+            if not window_id:
+                try:
+                    output = subprocess.check_output(['wmctrl', '-l']).decode()
+                    for line in output.splitlines():
+                        if f"MAGI Panel ({self.position})" in line:
+                            window_id = line.split()[0]
+                            break
+                except Exception as e:
+                    print(f"Error finding window by title: {e}")
+            
+            if window_id:
+                # Set window type and properties
+                subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,sticky,above'])
+                subprocess.run(['wmctrl', '-i', '-r', window_id, '-T', f'MAGI Panel ({self.position})'])
+                
+                # Position the window
+                display = self.get_display()
+                monitor = display.get_monitors()[0]
+                geometry = monitor.get_geometry()
+                scale = monitor.get_scale_factor()
+                
+                width = geometry.width
+                height = config['panel_height'] * scale
+                x = geometry.x
+                
+                if self.position == 'top':
+                    y = geometry.y
+                    # Set struts for top panel
+                    subprocess.run([
+                        'xprop', '-id', window_id,
+                        '-f', '_NET_WM_STRUT_PARTIAL', '32c',
+                        '-set', '_NET_WM_STRUT_PARTIAL',
+                        f'0, 0, {height}, 0, 0, 0, 0, 0, {x}, {x + width}, 0, 0'
+                    ])
+                else:
+                    y = geometry.y + geometry.height - height
+                    # Set struts for bottom panel
+                    subprocess.run([
+                        'xprop', '-id', window_id,
+                        '-f', '_NET_WM_STRUT_PARTIAL', '32c',
+                        '-set', '_NET_WM_STRUT_PARTIAL',
+                        f'0, 0, 0, {height}, 0, 0, 0, 0, 0, 0, {x}, {x + width}'
+                    ])
+                
+                # Position window using absolute positioning
+                subprocess.run([
+                    'xdotool', 'windowmove', window_id, str(x), str(y)
+                ])
+                
+                # Set window size
+                subprocess.run([
+                    'xdotool', 'windowsize', window_id, str(width), str(height)
+                ])
+                
+                # Ensure window is on top and sticky
+                subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,sticky,above'])
+                
+                # Set dock type
+                subprocess.run([
+                    'xprop', '-id', window_id,
+                    '-f', '_NET_WM_WINDOW_TYPE', '32a',
+                    '-set', '_NET_WM_WINDOW_TYPE',
+                    '_NET_WM_WINDOW_TYPE_DOCK'
+                ])
+        
+        except Exception as e:
+            print(f"Error in delayed window setup: {e}")
+        
         return False
     
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-    window.add(box)
+    def update_geometry(self):
+        """Update panel geometry when monitor changes"""
+        if self.get_realized():
+            self.delayed_window_setup()
+        return True
     
-    GLib.timeout_add(1000, update_geometry)
-    display = Gdk.Display.get_default()
-    display.connect('monitor-added', update_geometry)
-    display.connect('monitor-removed', update_geometry)
+    def setup_top_panel(self):
+        """Set up top panel widgets"""
+        # Launcher button
+        launcher = Gtk.Button(label=" MAGI ")
+        launcher.add_css_class('launcher-button')
+        launcher.connect('clicked', lambda w: subprocess.Popen(config['launcher'].split()))
+        
+        # Workspace switcher
+        workspace_switcher = WorkspaceSwitcher()
+        
+        # Window list
+        window_list = WindowList()
+        
+        # System monitor
+        monitor = SystemMonitor()
+        
+        # Network button
+        network = Gtk.Button()
+        network.set_child(Gtk.Image.new_from_icon_name("network-wireless-symbolic"))
+        network.connect('clicked', lambda w: subprocess.Popen(['nm-connection-editor']))
+        
+        # Clock
+        clock = Gtk.Label()
+        clock.add_css_class('clock-label')
+        def update_clock():
+            clock.set_label(time.strftime("%Y-%m-%d %H:%M:%S"))
+            return True
+        update_clock()
+        GLib.timeout_add(CLOCK_UPDATE_INTERVAL, update_clock)
+        
+        # Pack widgets
+        self.box.append(launcher)
+        self.box.append(workspace_switcher)
+        self.box.append(window_list)
+        self.box.append(monitor)
+        self.box.append(network)
+        self.box.append(clock)
     
-    return window, box
+    def setup_bottom_panel(self):
+        """Set up bottom panel widgets with centered content"""
+        # Center box for content
+        center_box = Gtk.CenterBox()
+        self.box.append(center_box)
+        
+        # Create a container for the buttons
+        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        
+        # LLM button
+        llm_button = Gtk.Button(label="Ask anything...")
+        llm_button.connect('clicked', lambda w: 
+            subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), 'llm_menu.py')]))
+        
+        # TTS button
+        tts_button = Gtk.Button()
+        tts_button.set_child(Gtk.Image.new_from_icon_name("audio-speakers-symbolic"))
+        tts_button.connect('clicked', self.speak_selection)
+        
+        # Voice input button
+        voice_button = VoiceInputButton()
+        
+        # Pack buttons into button box
+        button_box.append(llm_button)
+        button_box.append(tts_button)
+        button_box.append(voice_button)
+        
+        # Center the button box
+        center_box.set_center_widget(button_box)
+    
+    def speak_selection(self, button):
+        """Handle TTS button click"""
+        try:
+            clipboard = self.get_display().get_primary_clipboard()
+            clipboard.read_text_async(None, self._handle_clipboard_text)
+        except Exception as e:
+            print(f"TTS Error: {e}")
+    
+    def _handle_clipboard_text(self, clipboard, result):
+        """Handle clipboard text for TTS"""
+        try:
+            text = clipboard.read_text_finish(result)
+            if text:
+                subprocess.Popen(['espeak', text])
+        except Exception as e:
+            print(f"TTS Error: {e}")
 
-def setup_panels():
-    """Initialize panel layout with performance optimizations"""
-    global panels
+class MAGIApplication(Adw.Application):
+    """Main application class"""
+    def __init__(self):
+        # Use a proper reverse-DNS application ID format
+        super().__init__(application_id='dev.magi.shell')
     
-    if panels:
-        print("Warning: Panels already initialized")
-        return panels
-    
-    # Initialize NVIDIA for GPU monitoring
-    try:
-        nvmlInit()
-        nvidia_handle = nvmlDeviceGetHandleByIndex(0)
-    except Exception as e:
-        print(f"NVIDIA init error: {e}")
-        nvidia_handle = None
-    
-    # Create panels
-    top_panel, top_box = create_panel('top')
-    bottom_panel, bottom_box = create_panel('bottom')
-    
-    # Create and pack top panel components
-    components = {
-        'launcher': create_launcher_button(),
-        'workspace': create_workspace_switcher(),
-        'windows': create_window_list(),
-        'monitor': create_system_monitor(),
-        'network': create_network_button(),
-        'clock': create_clock()
-    }
-    
-    # Block redraws during component addition
-    top_panel.set_opacity(0)
-    top_box.pack_start(components['launcher'], False, False, 0)
-    top_box.pack_start(components['workspace'], False, False, 2)
-    top_box.pack_start(components['windows'], True, True, 0)
-    top_box.pack_end(components['monitor'], False, False, 2)
-    top_box.pack_end(components['network'], False, False, 2)
-    top_box.pack_end(components['clock'], False, False, 5)
-    top_panel.set_opacity(1)
-    
-    # Create and pack bottom panel components
-    center_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-    llm_button = create_llm_interface_button()
-    tts_button = create_tts_button()
-    voice_button = create_voice_input()
-    
-    bottom_panel.set_opacity(0)
-    bottom_box.pack_start(center_box, True, True, 0)
-    center_box.set_center_widget(llm_button)
-    bottom_box.pack_end(tts_button, False, False, 2)
-    bottom_box.pack_end(voice_button, False, False, 2)
-    bottom_panel.set_opacity(1)
-    
-    top_panel.show_all()
-    bottom_panel.show_all()
-    
-    panels = {'top': top_panel, 'bottom': bottom_panel}
-    return panels
-
-def draw_panel_background(widget, ctx):
-    """Draw panel background with Tokyo Night colors"""
-    ctx.set_source_rgba(0.10, 0.11, 0.15, 0.95)  # #1a1b26 with 0.95 alpha
-    ctx.set_operator(cairo.OPERATOR_SOURCE)
-    ctx.paint()
-    return False
+    def do_activate(self):
+        # Load config first
+        load_config()
+        
+        # Create panels
+        self.top_panel = MAGIPanel(app=self, position='top')
+        self.bottom_panel = MAGIPanel(app=self, position='bottom')
+        
+        # Show panels
+        self.top_panel.present()
+        self.bottom_panel.present()
 
 def main():
-    # Check X11 first
-    display = check_x11()
-    
-    # Load configuration
-    load_config()
-    
-    # Initialize Wnck with retry
-    screen = None
-    for _ in range(5):  # Try 5 times
-        try:
-            screen = Wnck.Screen.get_default()
-            screen.force_update()
-            break
-        except Exception:
-            time.sleep(1)
-    
-    if not screen:
-        print("Error: Could not initialize window manager connection")
-        sys.exit(1)
-    
-    
-    # Set up panels
-    global panels
-    panels = setup_panels()
-    
-    # Start GTK main loop
-    try:
-        Gtk.main()
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        sys.exit(1)
+    app = MAGIApplication()
+    return app.run(sys.argv)
 
 if __name__ == "__main__":
     try:
-        main()
-    except KeyboardInterrupt:
-        sys.exit(0)
+        # Enable GPU rendering
+        os.environ['GDK_BACKEND'] = 'gl'
+        
+        # Start application
+        app = MAGIApplication()
+        
+        def cleanup(signum=None, frame=None):
+            """Cleanup resources before exit"""
+            print("\nCleaning up...")
+            for panel in panels.values():
+                if hasattr(panel, 'cleanup_recording'):
+                    panel.cleanup_recording()
+            sys.exit(0)
+            
+        import signal
+        signal.signal(signal.SIGINT, cleanup)
+        signal.signal(signal.SIGTERM, cleanup)
+        
+        exit_code = app.run(sys.argv)
+        cleanup()
+        sys.exit(exit_code)
+        
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
