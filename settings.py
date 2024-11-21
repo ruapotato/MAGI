@@ -14,64 +14,8 @@ import requests
 import time
 import sys
 from collections import deque
+from ThemeManager import ThemeManager
 
-# Theme definitions
-MAGI_THEMES = {
-    "Plain": {
-        "panel_bg": "#ffffff",
-        "panel_fg": "#000000",
-        "button_bg": "#f0f0f0",
-        "button_hover": "#e0e0e0",
-        "button_active": "#d0d0d0",
-        "launcher_bg": "#2c71cc",
-        "accent": "#2c71cc",
-        "entry_bg": "#ffffff",
-        "entry_fg": "#000000",
-        "entry_border": "#cccccc",
-        "entry_focus": "#2c71cc",
-        "selection_bg": "#2c71cc",
-        "selection_fg": "#ffffff",
-        "link": "#0066cc",
-        "error": "#cc0000",
-        "subtitle_fg": "#666666"  # Darker gray for subtitles in light theme
-    },
-    "Tokyo Night": {
-        "panel_bg": "#1a1b26",
-        "panel_fg": "#c0caf5",  # Lighter blue-white for better contrast
-        "button_bg": "#24283b",
-        "button_hover": "#414868",
-        "button_active": "#565f89",
-        "launcher_bg": "#bb9af7",
-        "accent": "#7aa2f7",
-        "entry_bg": "#1f2335",
-        "entry_fg": "#c0caf5",  # Matching panel_fg
-        "entry_border": "#414868",
-        "entry_focus": "#7aa2f7",
-        "selection_bg": "#7aa2f7",
-        "selection_fg": "#1a1b26",
-        "link": "#73daca",
-        "error": "#f7768e",
-        "subtitle_fg": "#a9b1d6"  # Slightly dimmer than main text
-    },
-    "Forest": {
-        "panel_bg": "#2b3328",
-        "panel_fg": "#e4dfd2",  # Lighter for better contrast
-        "button_bg": "#3a4637",
-        "button_hover": "#4f6146",
-        "button_active": "#546c4d",
-        "launcher_bg": "#a7c080",
-        "accent": "#83c092",
-        "entry_bg": "#323d2f",
-        "entry_fg": "#e4dfd2",  # Matching panel_fg
-        "entry_border": "#4f6146",
-        "entry_focus": "#a7c080",
-        "selection_bg": "#a7c080",
-        "selection_fg": "#2b3328",
-        "link": "#83c092",
-        "error": "#e67e80",
-        "subtitle_fg": "#d3c6aa"  # Slightly dimmer than main text
-    }
-}
 
 
 class MAGISettings(Adw.Application):
@@ -86,9 +30,8 @@ class MAGISettings(Adw.Application):
         self.config = self.load_config()
         
         # Initialize theme system
-        self.magi_themes = MAGI_THEMES  # From previous code
+        self.theme_manager = ThemeManager()
         self.current_magi_theme = self.config.get('magi_theme', 'Plain')
-        self.apply_magi_theme(self.current_magi_theme)
     
     def on_shutdown(self, app):
         """Clean up when the application closes"""
@@ -100,6 +43,9 @@ class MAGISettings(Adw.Application):
         self.win = Adw.ApplicationWindow(application=app)
         self.win.set_default_size(1024, 768)
         self.win.maximize()
+        
+        # Register window with theme manager
+        self.theme_manager.register_window(self.win)
         
         # Create main layout box
         main_layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -495,279 +441,6 @@ class MAGISettings(Adw.Application):
         """Replace the existing appearance page with new theme system"""
         return self.create_theme_section()
 
-    def apply_magi_theme(self, theme_name):
-        """Apply MAGI-specific theme with complete widget and text styling"""
-        if theme_name not in self.magi_themes:
-            return
-        
-        theme = self.magi_themes[theme_name]
-        css = f"""
-        /* Override libadwaita default background colors */
-        .background {{
-            background-color: {theme['panel_bg']};
-            color: {theme['panel_fg']};
-        }}
-        
-        .navigationview {{
-            background-color: {theme['panel_bg']};
-        }}
-
-        preferencespage > scrolledwindow > viewport > box > clamp > box,
-        preferencespage > box > box,
-        preferencespage box.content,
-        preferencespage > scrolledwindow > viewport {{
-            background-color: {theme['panel_bg']};
-        }}
-
-        preferencespage box.content {{
-            background-color: {theme['panel_bg']};
-        }}
-
-        box.content {{
-            background-color: {theme['panel_bg']};
-        }}
-
-        .preferences-page {{
-            background-color: {theme['panel_bg']};
-        }}
-
-        row {{
-            background-color: {theme['button_bg']};
-            color: {theme['panel_fg']};
-            border-radius: 6px;
-            margin: 2px 0;
-        }}
-
-        row:hover {{
-            background-color: {theme['button_hover']};
-        }}
-
-        row label {{
-            color: {theme['panel_fg']};
-        }}
-
-        preferencesgroup {{
-            background-color: {theme['button_bg']};
-            border-radius: 12px;
-            padding: 6px;
-            margin: 6px;
-        }}
-
-        preferencesgroup > box > box {{
-            background-color: {theme['button_bg']};
-        }}
-
-        /* Group headers */
-        preferencesgroup > box > box.header {{
-            color: {theme['panel_fg']};
-        }}
-
-        preferencesgroup > box > box.header label {{
-            color: {theme['panel_fg']};
-        }}
-
-        preferencesgroup > box > box.header label.subtitle {{
-            color: {theme['subtitle_fg']};
-        }}
-
-        actionrow {{
-            background-color: {theme['entry_bg']};
-            color: {theme['panel_fg']};
-            border-radius: 6px;
-        }}
-
-        actionrow:hover {{
-            background-color: {theme['button_hover']};
-        }}
-
-        actionrow label {{
-            color: {theme['panel_fg']};
-        }}
-        
-        actionrow .subtitle {{
-            color: {theme['subtitle_fg']};
-        }}
-
-        /* Button Styling */
-        button {{
-            background-color: {theme['button_bg']};
-            color: {theme['panel_fg']};
-            padding: 6px 10px;
-            border-radius: 6px;
-            border: 1px solid alpha(currentColor, 0.1);
-            box-shadow: 0 1px 2px alpha(black, 0.1);
-        }}
-        
-        button:hover {{
-            background-color: {theme['button_hover']};
-            transform: translateY(-1px);
-            transition: all 200ms ease;
-        }}
-        
-        button:active {{
-            background-color: {theme['button_active']};
-            transform: translateY(0px);
-        }}
-
-        /* Entry/TextField Styling */
-        entry {{
-            background-color: {theme['entry_bg']};
-            color: {theme['entry_fg']};
-            border: 1px solid {theme['entry_border']};
-            border-radius: 6px;
-            padding: 8px;
-            caret-color: {theme['entry_fg']};
-        }}
-        
-        entry:focus {{
-            border-color: {theme['entry_focus']};
-            box-shadow: 0 0 0 2px alpha({theme['entry_focus']}, 0.3);
-        }}
-
-        /* Header styling */
-        headerbar {{
-            background-color: {theme['button_bg']};
-            color: {theme['panel_fg']};
-        }}
-
-        headerbar * {{
-            color: {theme['panel_fg']};
-        }}
-
-        headerbar label,
-        headerbar title {{
-            color: {theme['panel_fg']};
-        }}
-
-        /* Title and text styling */
-        .title {{
-            color: {theme['panel_fg']};
-        }}
-
-        .subtitle {{
-            color: {theme['subtitle_fg']};
-        }}
-
-        label {{
-            color: {theme['panel_fg']};
-        }}
-
-        /* Navigation sidebar */
-        .navigation-sidebar {{
-            background-color: {theme['button_bg']};
-        }}
-
-        .navigation-sidebar label {{
-            color: {theme['panel_fg']};
-        }}
-
-        .navigation-sidebar row:selected {{
-            background-color: {theme['accent']};
-            color: white;
-        }}
-
-        .navigation-sidebar row:hover:not(:selected) {{
-            background-color: {theme['button_hover']};
-        }}
-
-        /* Spinbutton styling */
-        spinbutton {{
-            background-color: {theme['entry_bg']};
-            color: {theme['entry_fg']};
-        }}
-
-        spinbutton text {{
-            color: {theme['entry_fg']};
-        }}
-
-        spinbutton button {{
-            background-color: {theme['button_bg']};
-            color: {theme['panel_fg']};
-        }}
-
-        /* Combobox styling */
-        combobox {{
-            background-color: {theme['entry_bg']};
-            color: {theme['entry_fg']};
-        }}
-
-        combobox button {{
-            background-color: {theme['entry_bg']};
-            color: {theme['entry_fg']};
-        }}
-
-        combobox * {{
-            color: {theme['entry_fg']};
-        }}
-
-        /* Menu styling */
-        menu {{
-            background-color: {theme['button_bg']};
-            color: {theme['panel_fg']};
-        }}
-
-        menuitem {{
-            color: {theme['panel_fg']};
-        }}
-
-        menuitem:hover {{
-            background-color: {theme['button_hover']};
-        }}
-
-        /* Link styling */
-        link {{
-            color: {theme['link']};
-        }}
-
-        link:hover {{
-            text-decoration: underline;
-        }}
-
-        /* Level bar styling */
-        levelbar block {{
-            min-height: 10px;
-        }}
-
-        levelbar block.filled {{
-            background-color: {theme['accent']};
-        }}
-
-        /* Selection styling */
-        *:selected {{
-            background-color: {theme['selection_bg']};
-            color: {theme['selection_fg']};
-        }}
-
-        /* Scrollbar styling */
-        scrollbar {{
-            background-color: transparent;
-        }}
-
-        scrollbar slider {{
-            background-color: alpha({theme['panel_fg']}, 0.2);
-            border-radius: 999px;
-            min-width: 8px;
-            min-height: 8px;
-        }}
-
-        scrollbar slider:hover {{
-            background-color: alpha({theme['panel_fg']}, 0.4);
-        }}
-
-        scrollbar slider:active {{
-            background-color: alpha({theme['panel_fg']}, 0.6);
-        }}
-        """
-        
-        provider = Gtk.CssProvider()
-        provider.load_from_data(css.encode())
-        
-        display = Gdk.Display.get_default()
-        Gtk.StyleContext.add_provider_for_display(
-            display,
-            provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
     
     def create_theme_section(self):
         """Create theme selection UI with three sections"""
@@ -810,9 +483,9 @@ class MAGISettings(Adw.Application):
         )
         magi_row = Adw.ComboRow(
             title="MAGI Theme",
-            model=Gtk.StringList.new(list(self.magi_themes.keys()))
+            model=Gtk.StringList.new(list(self.theme_manager.themes.keys()))
         )
-        current_theme_idx = list(self.magi_themes.keys()).index(self.current_magi_theme)
+        current_theme_idx = list(self.theme_manager.themes.keys()).index(self.current_magi_theme)
         magi_row.set_selected(current_theme_idx)
         magi_row.connect('notify::selected', self.on_magi_theme_changed)
         magi_group.add(magi_row)
@@ -908,13 +581,12 @@ class MAGISettings(Adw.Application):
     def on_magi_theme_changed(self, row, _):
         """Handle MAGI theme changes"""
         selected = row.get_selected()
-        themes = list(self.magi_themes.keys())
+        themes = list(self.theme_manager.themes.keys())
         if 0 <= selected < len(themes):
             theme_name = themes[selected]
             self.current_magi_theme = theme_name
             self.config['magi_theme'] = theme_name
             self.save_config()
-            self.apply_magi_theme(theme_name)
     
     def _show_window_after_theme_change(self):
         """Helper to show window after brief delay to allow theme to apply"""
@@ -1429,7 +1101,7 @@ class MAGISettings(Adw.Application):
         """Save current configuration to file"""
         try:
             os.makedirs(self.config_dir, exist_ok=True)
-            with open(os.path.join(self.config_dir, "config.json"), 'w') as f:
+            with open(self.config_file, 'w') as f:
                 json.dump(self.config, f, indent=4)
         except Exception as e:
             print(f"Error saving config: {e}")
