@@ -614,13 +614,23 @@ class MAGIPanel(Gtk.ApplicationWindow):
     
     def _setup_bottom_panel(self):
         """Set up bottom panel widgets"""
+        
+        settings_button = Gtk.Button()
+        settings_button.set_child(Gtk.Image.new_from_icon_name("preferences-system-symbolic"))  
+        settings_button.connect('clicked', lambda w:
+            subprocess.Popen([sys.executable, 
+                os.path.join(os.path.dirname(__file__), 'settings.py')]))
+        
         center_box = Gtk.CenterBox()
         self.box.append(center_box)
         
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         
         llm_button = Gtk.Button(label="Ask anything...")
-        llm_button.connect('clicked', lambda w: 
+        llm_button.add_css_class('llm-button')
+        llm_button.set_hexpand(True)
+        llm_button.set_halign(Gtk.Align.CENTER)
+        llm_button.connect('clicked', lambda w:
             subprocess.Popen([sys.executable, 
                 os.path.join(os.path.dirname(__file__), 'llm_menu.py')]))
         
@@ -630,6 +640,7 @@ class MAGIPanel(Gtk.ApplicationWindow):
         
         voice_button = VoiceInputButton()
         
+        button_box.append(settings_button)
         button_box.append(llm_button)
         button_box.append(tts_button)
         button_box.append(voice_button)
