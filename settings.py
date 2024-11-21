@@ -3,12 +3,49 @@
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
-from gi.repository import Gtk, Adw, Gio, GLib, Gdk
+from gi.repository import Gtk, Adw, Gdk, GLib, Gio
 import json
 import os
-import sounddevice as sd
 import subprocess
+import sounddevice as sd
 import numpy as np
+import threading
+import requests
+import time
+import sys
+from collections import deque
+
+# Theme definitions
+MAGI_THEMES = {
+    "Plain": {
+        "panel_bg": "#ffffff",
+        "panel_fg": "#000000", 
+        "button_bg": "#f0f0f0",
+        "button_hover": "#e0e0e0",
+        "button_active": "#d0d0d0",
+        "launcher_bg": "#215d9c",
+        "accent": "#215d9c"
+    },
+    "Tokyo Night": {
+        "panel_bg": "#1a1b26",
+        "panel_fg": "#a9b1d6",
+        "button_bg": "#24283b",
+        "button_hover": "#414868",
+        "button_active": "#565f89",
+        "launcher_bg": "#bb9af7", 
+        "accent": "#7aa2f7"
+    },
+    "Forest": {
+        "panel_bg": "#2b3328",
+        "panel_fg": "#d3c6aa",
+        "button_bg": "#3a4637",
+        "button_hover": "#4f6146",
+        "button_active": "#546c4d",
+        "launcher_bg": "#a7c080",
+        "accent": "#83c092"
+    }
+}
+
 
 class MAGISettings(Adw.Application):
     def __init__(self):
@@ -16,10 +53,15 @@ class MAGISettings(Adw.Application):
         self.connect('activate', self.on_activate)
         self.connect('shutdown', self.on_shutdown)
         
-        # Load config
+        # Load config and theme data
         self.config_dir = os.path.expanduser("~/.config/magi")
         self.config_file = os.path.join(self.config_dir, "config.json")
         self.config = self.load_config()
+        
+        # Initialize theme system
+        self.magi_themes = MAGI_THEMES  # From previous code
+        self.current_magi_theme = self.config.get('magi_theme', 'Plain')
+        self.apply_magi_theme(self.current_magi_theme)
     
     def on_shutdown(self, app):
         """Clean up when the application closes"""
@@ -423,55 +465,229 @@ class MAGISettings(Adw.Application):
         return page
     
     def create_appearance_page(self):
-        """Create appearance settings page with live theme preview"""
+        """Replace the existing appearance page with new theme system"""
+        return self.create_theme_section()
+    
+    def apply_magi_theme(self, theme_name):
+        """Apply MAGI-specific theme"""
+        if theme_name not in self.magi_themes:
+            return
+        
+        theme = self.magi_themes[theme_name]
+        css = f"""
+        window, window.background {{
+            background-color: {theme['panel_bg']};
+            color: {theme['panel_fg']};
+        }}
+        
+        button {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+            padding: 4px 8px;
+            border-radius: 4px;
+        }}
+        
+        button:hover {{
+            background-color: {theme['button_hover']};
+        }}
+        
+        button:active {{
+            background-color: {theme['button_active']};
+        }}
+        
+        .launcher-button {{
+            background-color: {theme['launcher_bg']};
+            color: {theme['panel_fg']};
+            padding: 0 8px;
+            border-radius: 4px;
+        }}
+        
+        .message-button {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+            padding: 4px;
+            border-radius: 4px;
+        }}
+        
+        .user-message {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+            padding: 12px;
+            border-radius: 8px;
+        }}
+        
+        .assistant-message {{
+            background-color: alpha({theme['accent']}, 0.1);
+            color: {theme['panel_fg']};
+            padding: 12px;
+            border-radius: 8px;
+        }}
+        
+        .code-block {{
+            background-color: {theme['panel_bg']};
+            color: {theme['panel_fg']};
+            padding: 12px;
+            border-radius: 8px;
+            font-family: monospace;
+        }}
+        """
+        
+        provider = Gtk.CssProvider()
+        provider.load_from_data(css.encode())
+        
+        display = Gdk.Display.get_default()
+        Gtk.StyleContext.add_provider_for_display(
+            display,
+            provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+    
+    def create_theme_section(self):
+        """Create theme selection UI with three sections"""
         page = Adw.PreferencesPage()
-        page.set_hexpand(True)
-        page.set_vexpand(True)
         
-        # Add toast overlay for notifications
-        self.toast_overlay = Adw.ToastOverlay()
-        self.toast_overlay.set_vexpand(True)
-        
-        # Theme settings group
-        theme_group = Adw.PreferencesGroup(title="Theme Settings")
-        
-        # Theme selection
-        theme_row = Adw.ComboRow(
-            title="Application Theme",
-            subtitle="Select the GTK theme to use"
+        # GTK3 themes
+        gtk3_group = Adw.PreferencesGroup(
+            title="GTK3 Theme",
+            description="Theme for legacy applications"
         )
-        
-        # Get available themes
-        theme_store = Gtk.StringList()
-        self.themes = self.get_available_themes()
-        current_theme = self.config.get('gtk_theme', 'Default')
-        
-        theme_store.append("Default (System)")
-        selected_idx = 0
-        
-        for i, theme in enumerate(self.themes, 1):
-            theme_store.append(theme)
-            if theme == current_theme:
-                selected_idx = i
-        
-        theme_row.set_model(theme_store)
-        theme_row.set_selected(selected_idx)
-        theme_row.connect('notify::selected', self.on_theme_changed)
-        theme_group.add(theme_row)
-        
-        # Add warning about theme switching
-        warning_group = Adw.PreferencesGroup()
-        warning_row = Adw.ActionRow(
-            title="Note: Some theme changes may require logging out to fully apply",
-            subtitle="Immediate changes will be visible in newly opened windows"
+        gtk3_row = Adw.ComboRow(
+            title="GTK3 Theme",
+            model=Gtk.StringList.new(self.get_gtk3_themes())
         )
-        warning_group.add(warning_row)
+        # Set current GTK3 theme
+        current_gtk3 = self.config.get('gtk3_theme', 'Default')
+        gtk3_themes = self.get_gtk3_themes()
+        if current_gtk3 in gtk3_themes:
+            gtk3_row.set_selected(gtk3_themes.index(current_gtk3))
+        gtk3_row.connect('notify::selected', self.on_gtk3_theme_changed)
+        gtk3_group.add(gtk3_row)
         
-        page.add(theme_group)
-        page.add(warning_group)
+        # GTK4 color scheme
+        gtk4_group = Adw.PreferencesGroup(
+            title="GTK4 Style",
+            description="Color scheme for modern applications"
+        )
+        gtk4_row = Adw.ComboRow(
+            title="Color Scheme",
+            model=Gtk.StringList.new(["System Default", "Prefer Dark", "Prefer Light", "Force Dark"])
+        )
+        gtk4_row.set_selected(self.config.get('gtk4_scheme', 0))
+        gtk4_row.connect('notify::selected', self.on_gtk4_theme_changed)
+        gtk4_group.add(gtk4_row)
         
-        self.toast_overlay.set_child(page)
-        return self.toast_overlay
+        # MAGI theme
+        magi_group = Adw.PreferencesGroup(
+            title="MAGI Theme",
+            description="Theme for MAGI panels and menus"
+        )
+        magi_row = Adw.ComboRow(
+            title="MAGI Theme",
+            model=Gtk.StringList.new(list(self.magi_themes.keys()))
+        )
+        current_theme_idx = list(self.magi_themes.keys()).index(self.current_magi_theme)
+        magi_row.set_selected(current_theme_idx)
+        magi_row.connect('notify::selected', self.on_magi_theme_changed)
+        magi_group.add(magi_row)
+        
+        page.add(gtk3_group)
+        page.add(gtk4_group)
+        page.add(magi_group)
+        
+        return page
+    
+    def get_gtk3_themes(self):
+        """Get list of installed GTK3 themes"""
+        themes = set(["Default"])
+        theme_paths = [
+            os.path.expanduser('~/.themes'),
+            os.path.expanduser('~/.local/share/themes'),
+            '/usr/share/themes'
+        ]
+        
+        for path in theme_paths:
+            if os.path.exists(path):
+                for theme in os.listdir(path):
+                    theme_dir = os.path.join(path, theme)
+                    if os.path.isdir(theme_dir):
+                        # Check for GTK3 theme files
+                        if (os.path.exists(os.path.join(theme_dir, 'gtk-3.0', 'gtk.css')) or
+                            os.path.exists(os.path.join(theme_dir, 'gtk-3.0', 'gtk-main.css'))):
+                            themes.add(theme)
+        
+        return sorted(list(themes))
+    
+    def on_gtk3_theme_changed(self, row, _):
+        """Handle GTK3 theme changes safely"""
+        selected = row.get_selected()
+        themes = self.get_gtk3_themes()
+        if 0 <= selected < len(themes):
+            theme_name = themes[selected]
+            
+            # Update GTK settings
+            settings = Gtk.Settings.get_default()
+            settings.set_property('gtk-theme-name', theme_name)
+            
+            # Update system settings safely
+            try:
+                # Update MATE interface theme
+                subprocess.run(['gsettings', 'set', 'org.mate.interface', 'gtk-theme', theme_name],
+                            check=False)
+                
+                # Update window manager theme
+                subprocess.run(['gsettings', 'set', 'org.mate.Marco.general', 'theme', theme_name],
+                            check=False)
+                
+                # Update through dconf for persistence
+                subprocess.run(['dconf', 'write', '/org/mate/desktop/interface/gtk-theme',
+                            f"'{theme_name}'"], check=False)
+                
+            except Exception as e:
+                print(f"Error updating GTK3 theme: {e}")
+            
+            self.config['gtk3_theme'] = theme_name
+            self.save_config()
+            
+            # Show notification
+            if hasattr(self, 'toast_overlay'):
+                toast = Adw.Toast.new(f"GTK3 theme changed to {theme_name}")
+                toast.set_timeout(2)
+                self.toast_overlay.add_toast(toast)
+
+            # Suggest logout for complete theme application
+            dialog = Adw.MessageDialog.new(
+                self,
+                "Theme Changed",
+                "Some applications may need to be restarted or require a logout to fully apply the theme."
+            )
+            dialog.add_response("ok", "OK")
+            dialog.present()
+    
+    def on_gtk4_theme_changed(self, row, _):
+        """Handle GTK4 color scheme changes"""
+        schemes = [
+            Adw.ColorScheme.DEFAULT,
+            Adw.ColorScheme.PREFER_DARK,
+            Adw.ColorScheme.PREFER_LIGHT,
+            Adw.ColorScheme.FORCE_DARK
+        ]
+        selected = row.get_selected()
+        if 0 <= selected < len(schemes):
+            style_manager = Adw.StyleManager.get_default()
+            style_manager.set_color_scheme(schemes[selected])
+            self.config['gtk4_scheme'] = selected
+            self.save_config()
+    
+    def on_magi_theme_changed(self, row, _):
+        """Handle MAGI theme changes"""
+        selected = row.get_selected()
+        themes = list(self.magi_themes.keys())
+        if 0 <= selected < len(themes):
+            theme_name = themes[selected]
+            self.current_magi_theme = theme_name
+            self.config['magi_theme'] = theme_name
+            self.save_config()
+            self.apply_magi_theme(theme_name)
     
     def _show_window_after_theme_change(self):
         """Helper to show window after brief delay to allow theme to apply"""
@@ -915,54 +1131,67 @@ class MAGISettings(Adw.Application):
         self.save_config()
     
     def on_theme_changed(self, row, _):
-        """Handle theme selection with proper system-wide application"""
+        """Handle theme selection for both GTK3 and GTK4/libadwaita apps"""
         selected = row.get_selected()
         theme_name = "Default"
         
-        if selected > 0:  # First item is "Default"
+        if selected > 0:
             theme_name = self.themes[selected - 1]
         
-        # Update GTK settings
-        settings = Gtk.Settings.get_default()
+        # Detect if dark theme
+        is_dark = any(x in theme_name.lower() for x in ['dark', 'noir', 'nacht', 'black'])
         
-        if theme_name == "Default":
-            # Use system theme
-            settings.reset_property('gtk-theme-name')
-            # Reset in gsettings
-            interface_settings = Gio.Settings.new('org.mate.interface')
-            interface_settings.reset('gtk-theme')
+        # Set GTK4/libadwaita color scheme
+        style_manager = Adw.StyleManager.get_default()
+        if is_dark:
+            style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         else:
-            # Set theme directly
-            settings.set_property('gtk-theme-name', theme_name)
-            
-            # Update MATE interface settings
-            interface_settings = Gio.Settings.new('org.mate.interface')
-            interface_settings.set_string('gtk-theme', theme_name)
-            
-            # Update mate-settings-daemon configuration
-            marco_settings = Gio.Settings.new('org.mate.Marco.general')
-            marco_settings.set_string('theme', theme_name)
+            style_manager.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
         
-        # Update xsettings directly via dconf
+        # Handle GTK3 apps
+        settings = Gtk.Settings.get_default()
+        if theme_name == "Default":
+            settings.reset_property('gtk-theme-name')
+            try:
+                interface_settings = Gio.Settings.new('org.gnome.desktop.interface')
+                interface_settings.reset('gtk-theme')
+            except:
+                pass
+        else:
+            settings.set_property('gtk-theme-name', theme_name)
+            try:
+                interface_settings = Gio.Settings.new('org.gnome.desktop.interface')
+                interface_settings.set_string('gtk-theme', theme_name)
+            except:
+                pass
+                
+            # Update window manager theme
+            try:
+                marco_settings = Gio.Settings.new('org.mate.Marco.general')
+                marco_settings.set_string('theme', theme_name)
+            except:
+                pass
+        
+        # Update dconf
         try:
-            subprocess.run([
-                'dconf', 'write', '/org/mate/desktop/interface/gtk-theme',
-                f"'{theme_name}'"
-            ], check=False)
+            subprocess.run(['dconf', 'write', '/org/gnome/desktop/interface/gtk-theme',
+                        f"'{theme_name}'"], check=False)
+            subprocess.run(['dconf', 'write', '/org/gnome/desktop/interface/color-scheme',
+                        "'prefer-dark'" if is_dark else "'default'"], check=False)
         except Exception as e:
             print(f"Warning: Could not update dconf settings: {e}")
         
         # Save to config
         self.config['gtk_theme'] = theme_name
+        self.config['prefer_dark'] = is_dark
         self.save_config()
         
-        # Give the system a moment to apply the theme
+        # Force redraw
         def apply_theme():
-            # Force our window to redraw
             self.win.queue_draw()
-            # Show a notification about theme change
+            scheme = "dark" if is_dark else "light"
             if hasattr(self, 'toast_overlay'):
-                toast = Adw.Toast.new(f"Theme changed to {theme_name}")
+                toast = Adw.Toast.new(f"Theme changed to {theme_name} ({scheme})")
                 toast.set_timeout(2)
                 self.toast_overlay.add_toast(toast)
             return False
