@@ -19,8 +19,8 @@ from collections import deque
 from weakref import WeakKeyDictionary
 
 # Enable GPU acceleration but with optimized settings
-os.environ['GDK_BACKEND'] = 'gl'
-os.environ['GSK_RENDERER'] = 'gl'
+#os.environ['GDK_BACKEND'] = 'gl'
+#os.environ['GSK_RENDERER'] = 'gl'
 os.environ['GTK_CSD'] = '0'
 os.environ['GDK_SCALE'] = '1'
 
