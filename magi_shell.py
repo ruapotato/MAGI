@@ -256,7 +256,7 @@ class WindowList(Gtk.Box):
                     if window_id not in self._window_buttons:
                         button = self._button_pool.acquire()
                         button.set_label(title[:30])
-                        button.connect('clicked', self._activate_window, window_id)
+                        button.connect('clicked', self.activate_window, window_id)  # Fixed method name
                         self.append(button)
                         self._window_buttons[window_id] = button
                     else:
@@ -274,6 +274,13 @@ class WindowList(Gtk.Box):
             print(f"Window list update error: {e}")
         
         return True  # Keep the timeout going
+    
+    def activate_window(self, button, window_id):  # Fixed method name
+        """Activate window with error handling"""
+        try:
+            subprocess.run(['wmctrl', '-ia', window_id], check=True)
+        except Exception as e:
+            print(f"Window activation error: {e}")
 
 class SystemMonitor(Gtk.Box):
     """Optimized system monitor"""
@@ -544,13 +551,34 @@ class MAGIPanel(Gtk.ApplicationWindow):
         else:
             self._setup_bottom_panel()
     
+    
+    def _launch_command(self, command):
+        """Launch command with proper display environment"""
+        try:
+            # Get current display
+            display = self.get_display()
+            display_name = display.get_name()
+            
+            # Set up environment with correct display
+            env = os.environ.copy()
+            env['DISPLAY'] = display_name
+            
+            # Split command if it's a string
+            if isinstance(command, str):
+                command = command.split()
+            
+            # Launch process with correct display
+            subprocess.Popen(command, env=env)
+        except Exception as e:
+            print(f"Launch error: {e}")
+        
     def _setup_top_panel(self):
         """Set up top panel widgets"""
         # Create widgets
         launcher = Gtk.Button(label=" MAGI ")
         launcher.add_css_class('launcher-button')
-        launcher.connect('clicked', 
-            lambda w: subprocess.Popen(config['launcher'].split()))
+        # Fixed launcher command to include display
+        launcher.connect('clicked', lambda w: self._launch_command(config['launcher']))
         
         workspace_switcher = WorkspaceSwitcher(self._update_manager)
         window_list = WindowList(self._update_manager)
@@ -558,19 +586,17 @@ class MAGIPanel(Gtk.ApplicationWindow):
         
         network = Gtk.Button()
         network.set_child(Gtk.Image.new_from_icon_name("network-wireless-symbolic"))
-        network.connect('clicked', 
-            lambda w: subprocess.Popen(['nm-connection-editor']))
+        # Fixed network command to include display
+        network.connect('clicked', lambda w: self._launch_command('nm-connection-editor'))
         
         clock = Gtk.Label()
         clock.add_css_class('clock-label')
         
         def update_clock():
             clock.set_label(time.strftime("%Y-%m-%d %H:%M:%S"))
-            return True  # Important: keep the timeout going
+            return True
         
-        # Start immediate clock update
         update_clock()
-        # Schedule regular clock updates
         GLib.timeout_add(1000, update_clock)
         
         # Pack widgets
