@@ -32,41 +32,44 @@ MAGI_THEMES = {
         "selection_bg": "#2c71cc",
         "selection_fg": "#ffffff",
         "link": "#0066cc",
-        "error": "#cc0000"
+        "error": "#cc0000",
+        "subtitle_fg": "#666666"  # Darker gray for subtitles in light theme
     },
     "Tokyo Night": {
         "panel_bg": "#1a1b26",
-        "panel_fg": "#a9b1d6",
+        "panel_fg": "#c0caf5",  # Lighter blue-white for better contrast
         "button_bg": "#24283b",
         "button_hover": "#414868",
         "button_active": "#565f89",
         "launcher_bg": "#bb9af7",
         "accent": "#7aa2f7",
         "entry_bg": "#1f2335",
-        "entry_fg": "#c0caf5",
+        "entry_fg": "#c0caf5",  # Matching panel_fg
         "entry_border": "#414868",
         "entry_focus": "#7aa2f7",
         "selection_bg": "#7aa2f7",
         "selection_fg": "#1a1b26",
         "link": "#73daca",
-        "error": "#f7768e"
+        "error": "#f7768e",
+        "subtitle_fg": "#a9b1d6"  # Slightly dimmer than main text
     },
     "Forest": {
         "panel_bg": "#2b3328",
-        "panel_fg": "#d3c6aa",
+        "panel_fg": "#e4dfd2",  # Lighter for better contrast
         "button_bg": "#3a4637",
         "button_hover": "#4f6146",
         "button_active": "#546c4d",
         "launcher_bg": "#a7c080",
         "accent": "#83c092",
         "entry_bg": "#323d2f",
-        "entry_fg": "#d3c6aa",
+        "entry_fg": "#e4dfd2",  # Matching panel_fg
         "entry_border": "#4f6146",
         "entry_focus": "#a7c080",
         "selection_bg": "#a7c080",
         "selection_fg": "#2b3328",
         "link": "#83c092",
-        "error": "#e67e80"
+        "error": "#e67e80",
+        "subtitle_fg": "#d3c6aa"  # Slightly dimmer than main text
     }
 }
 
@@ -492,20 +495,99 @@ class MAGISettings(Adw.Application):
         """Replace the existing appearance page with new theme system"""
         return self.create_theme_section()
 
-
     def apply_magi_theme(self, theme_name):
-        """Apply enhanced MAGI-specific theme"""
+        """Apply MAGI-specific theme with complete widget and text styling"""
         if theme_name not in self.magi_themes:
             return
         
         theme = self.magi_themes[theme_name]
         css = f"""
-        /* Window and General Styling */
-        window, window.background {{
+        /* Override libadwaita default background colors */
+        .background {{
             background-color: {theme['panel_bg']};
             color: {theme['panel_fg']};
         }}
         
+        .navigationview {{
+            background-color: {theme['panel_bg']};
+        }}
+
+        preferencespage > scrolledwindow > viewport > box > clamp > box,
+        preferencespage > box > box,
+        preferencespage box.content,
+        preferencespage > scrolledwindow > viewport {{
+            background-color: {theme['panel_bg']};
+        }}
+
+        preferencespage box.content {{
+            background-color: {theme['panel_bg']};
+        }}
+
+        box.content {{
+            background-color: {theme['panel_bg']};
+        }}
+
+        .preferences-page {{
+            background-color: {theme['panel_bg']};
+        }}
+
+        row {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+            border-radius: 6px;
+            margin: 2px 0;
+        }}
+
+        row:hover {{
+            background-color: {theme['button_hover']};
+        }}
+
+        row label {{
+            color: {theme['panel_fg']};
+        }}
+
+        preferencesgroup {{
+            background-color: {theme['button_bg']};
+            border-radius: 12px;
+            padding: 6px;
+            margin: 6px;
+        }}
+
+        preferencesgroup > box > box {{
+            background-color: {theme['button_bg']};
+        }}
+
+        /* Group headers */
+        preferencesgroup > box > box.header {{
+            color: {theme['panel_fg']};
+        }}
+
+        preferencesgroup > box > box.header label {{
+            color: {theme['panel_fg']};
+        }}
+
+        preferencesgroup > box > box.header label.subtitle {{
+            color: {theme['subtitle_fg']};
+        }}
+
+        actionrow {{
+            background-color: {theme['entry_bg']};
+            color: {theme['panel_fg']};
+            border-radius: 6px;
+        }}
+
+        actionrow:hover {{
+            background-color: {theme['button_hover']};
+        }}
+
+        actionrow label {{
+            color: {theme['panel_fg']};
+        }}
+        
+        actionrow .subtitle {{
+            color: {theme['subtitle_fg']};
+        }}
+
         /* Button Styling */
         button {{
             background-color: {theme['button_bg']};
@@ -526,27 +608,7 @@ class MAGISettings(Adw.Application):
             background-color: {theme['button_active']};
             transform: translateY(0px);
         }}
-        
-        .launcher-button {{
-            background-color: {theme['launcher_bg']};
-            color: {'#ffffff' if theme_name != "Plain" else '#ffffff'};
-            font-weight: bold;
-            padding: 0 12px;
-            border: none;
-        }}
-        
-        .message-button {{
-            background-color: transparent;
-            color: {theme['panel_fg']};
-            padding: 4px;
-            border: none;
-            box-shadow: none;
-        }}
-        
-        .message-button:hover {{
-            background-color: alpha({theme['button_hover']}, 0.5);
-        }}
-        
+
         /* Entry/TextField Styling */
         entry {{
             background-color: {theme['entry_bg']};
@@ -554,7 +616,6 @@ class MAGISettings(Adw.Application):
             border: 1px solid {theme['entry_border']};
             border-radius: 6px;
             padding: 8px;
-            box-shadow: inset 0 1px 2px alpha(black, 0.1);
             caret-color: {theme['entry_fg']};
         }}
         
@@ -562,73 +623,137 @@ class MAGISettings(Adw.Application):
             border-color: {theme['entry_focus']};
             box-shadow: 0 0 0 2px alpha({theme['entry_focus']}, 0.3);
         }}
-        
-        /* Selection Styling */
+
+        /* Header styling */
+        headerbar {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+        }}
+
+        headerbar * {{
+            color: {theme['panel_fg']};
+        }}
+
+        headerbar label,
+        headerbar title {{
+            color: {theme['panel_fg']};
+        }}
+
+        /* Title and text styling */
+        .title {{
+            color: {theme['panel_fg']};
+        }}
+
+        .subtitle {{
+            color: {theme['subtitle_fg']};
+        }}
+
+        label {{
+            color: {theme['panel_fg']};
+        }}
+
+        /* Navigation sidebar */
+        .navigation-sidebar {{
+            background-color: {theme['button_bg']};
+        }}
+
+        .navigation-sidebar label {{
+            color: {theme['panel_fg']};
+        }}
+
+        .navigation-sidebar row:selected {{
+            background-color: {theme['accent']};
+            color: white;
+        }}
+
+        .navigation-sidebar row:hover:not(:selected) {{
+            background-color: {theme['button_hover']};
+        }}
+
+        /* Spinbutton styling */
+        spinbutton {{
+            background-color: {theme['entry_bg']};
+            color: {theme['entry_fg']};
+        }}
+
+        spinbutton text {{
+            color: {theme['entry_fg']};
+        }}
+
+        spinbutton button {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+        }}
+
+        /* Combobox styling */
+        combobox {{
+            background-color: {theme['entry_bg']};
+            color: {theme['entry_fg']};
+        }}
+
+        combobox button {{
+            background-color: {theme['entry_bg']};
+            color: {theme['entry_fg']};
+        }}
+
+        combobox * {{
+            color: {theme['entry_fg']};
+        }}
+
+        /* Menu styling */
+        menu {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+        }}
+
+        menuitem {{
+            color: {theme['panel_fg']};
+        }}
+
+        menuitem:hover {{
+            background-color: {theme['button_hover']};
+        }}
+
+        /* Link styling */
+        link {{
+            color: {theme['link']};
+        }}
+
+        link:hover {{
+            text-decoration: underline;
+        }}
+
+        /* Level bar styling */
+        levelbar block {{
+            min-height: 10px;
+        }}
+
+        levelbar block.filled {{
+            background-color: {theme['accent']};
+        }}
+
+        /* Selection styling */
         *:selected {{
             background-color: {theme['selection_bg']};
             color: {theme['selection_fg']};
         }}
-        
-        /* Message Styling */
-        .user-message {{
-            background-color: alpha({theme['button_bg']}, 0.8);
-            color: {theme['panel_fg']};
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid alpha(currentColor, 0.1);
-            box-shadow: 0 2px 4px alpha(black, 0.1);
-            margin: 4px 8px;
-        }}
-        
-        .assistant-message {{
-            background-color: alpha({theme['accent']}, 0.1);
-            color: {theme['panel_fg']};
-            padding: 12px;
-            border-radius: 12px;
-            border: 1px solid alpha({theme['accent']}, 0.2);
-            box-shadow: 0 2px 4px alpha(black, 0.1);
-            margin: 4px 8px;
-        }}
-        
-        .code-block {{
-            background-color: {theme['entry_bg']};
-            color: {theme['entry_fg']};
-            padding: 12px;
-            border-radius: 8px;
-            font-family: monospace;
-            border: 1px solid {theme['entry_border']};
-        }}
-        
-        /* Link Styling */
-        link {{
-            color: {theme['link']};
-        }}
-        
-        link:hover {{
-            text-decoration: underline;
-        }}
-        
-        /* Error and Warning Styling */
-        .error {{
-            color: {theme['error']};
-        }}
-        
-        /* Scrollbar Styling */
+
+        /* Scrollbar styling */
         scrollbar {{
             background-color: transparent;
         }}
-        
+
         scrollbar slider {{
             background-color: alpha({theme['panel_fg']}, 0.2);
             border-radius: 999px;
             min-width: 8px;
             min-height: 8px;
         }}
-        
+
         scrollbar slider:hover {{
             background-color: alpha({theme['panel_fg']}, 0.4);
         }}
-        
+
         scrollbar slider:active {{
             background-color: alpha({theme['panel_fg']}, 0.6);
         }}
