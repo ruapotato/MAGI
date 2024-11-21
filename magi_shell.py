@@ -17,10 +17,9 @@ import sounddevice as sd
 from pynvml import nvmlInit, nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo, nvmlDeviceGetUtilizationRates
 from collections import deque
 from weakref import WeakKeyDictionary
+from ThemeManager import ThemeManager
 
 # Enable GPU acceleration but with optimized settings
-#os.environ['GDK_BACKEND'] = 'gl'
-#os.environ['GSK_RENDERER'] = 'gl'
 os.environ['GTK_CSD'] = '0'
 os.environ['GDK_SCALE'] = '1'
 
@@ -32,14 +31,13 @@ CACHE_TIMEOUT = 5000       # Cache timeout in ms
 
 def load_config():
     """Load configuration from JSON file"""
-    global config
     config_path = os.path.expanduser("~/.config/magi/config.json")
     try:
         with open(config_path) as f:
-            config = json.load(f)
+            return json.load(f)
     except Exception as e:
         print(f"Warning: Could not load config ({e}), using defaults")
-        config = {
+        default_config = {
             "panel_height": 28,
             "workspace_count": 4,
             "enable_effects": True,
@@ -49,14 +47,16 @@ def load_config():
             "background": "/usr/share/magi/backgrounds/default.png",
             "ollama_model": "mistral",
             "whisper_endpoint": "http://localhost:5000/transcribe",
-            "sample_rate": 16000
+            "sample_rate": 16000,
+            "magi_theme": "Plain"
         }
         try:
             os.makedirs(os.path.dirname(config_path), exist_ok=True)
             with open(config_path, 'w') as f:
-                json.dump(config, f, indent=4)
+                json.dump(default_config, f, indent=4)
         except Exception as e:
             print(f"Warning: Could not save config: {e}")
+        return default_config
 
 class UpdateManager:
     """Centralized update manager to coordinate all panel updates"""
@@ -88,8 +88,8 @@ class UpdateManager:
         current_time = time.monotonic() * 1000
         processed = set()
         
-        for name in list(self._pending):  # Create a copy of the set for iteration
-            if name in self._updates:  # Check if update still exists
+        for name in list(self._pending):
+            if name in self._updates:
                 callback, interval = self._updates[name]
                 last_time = self._last_update.get(name, 0)
                 
@@ -103,7 +103,7 @@ class UpdateManager:
         
         self._pending -= processed
         self._batch_id = None
-        return False  # Don't repeat the timeout
+        return False
 
 class WidgetPool:
     """Object pool for GTK widgets"""
@@ -171,6 +171,7 @@ class WorkspaceSwitcher(Gtk.Box):
         self._setup_workspace_buttons()
         
     def _setup_workspace_buttons(self):
+        config = load_config()
         for i in range(config['workspace_count']):
             button = self._button_pool.acquire()
             button.set_label(str(i + 1))
@@ -256,7 +257,7 @@ class WindowList(Gtk.Box):
                     if window_id not in self._window_buttons:
                         button = self._button_pool.acquire()
                         button.set_label(title[:30])
-                        button.connect('clicked', self.activate_window, window_id)  # Fixed method name
+                        button.connect('clicked', self.activate_window, window_id)
                         self.append(button)
                         self._window_buttons[window_id] = button
                     else:
@@ -275,7 +276,7 @@ class WindowList(Gtk.Box):
         
         return True  # Keep the timeout going
     
-    def activate_window(self, button, window_id):  # Fixed method name
+    def activate_window(self, button, window_id):
         """Activate window with error handling"""
         try:
             subprocess.run(['wmctrl', '-ia', window_id], check=True)
@@ -342,7 +343,7 @@ class SystemMonitor(Gtk.Box):
         except Exception as e:
             print(f"Stats update error: {e}")
         
-        return True  # Important: keep the timeout going
+        return True
 
 class VoiceInputButton(Gtk.Button):
     """Optimized voice input button"""
@@ -464,6 +465,7 @@ class VoiceInputButton(Gtk.Button):
     
     def _transcribe_audio(self, audio_data):
         """Transcribe audio in background"""
+        config = load_config()
         try:
             print("Sending to whisper...")
             files = {'audio': ('audio.wav', audio_data.tobytes())}
@@ -499,6 +501,9 @@ class MAGIPanel(Gtk.ApplicationWindow):
     def __init__(self, app, position='top'):
         super().__init__(application=app)
         
+        # Register with theme manager
+        ThemeManager().register_window(self)
+        
         self.position = position
         self.set_title(f"MAGI Panel ({position})")
         self.set_decorated(False)
@@ -532,6 +537,7 @@ class MAGIPanel(Gtk.ApplicationWindow):
         
         # Set dimensions
         self.panel_width = geometry.width
+        config = load_config()
         self.panel_height = config['panel_height'] * scale
         
         # Set size constraints
@@ -550,7 +556,6 @@ class MAGIPanel(Gtk.ApplicationWindow):
             self._setup_top_panel()
         else:
             self._setup_bottom_panel()
-    
     
     def _launch_command(self, command):
         """Launch command with proper display environment"""
@@ -571,13 +576,14 @@ class MAGIPanel(Gtk.ApplicationWindow):
             subprocess.Popen(command, env=env)
         except Exception as e:
             print(f"Launch error: {e}")
-        
+    
     def _setup_top_panel(self):
         """Set up top panel widgets"""
+        config = load_config()
+        
         # Create widgets
         launcher = Gtk.Button(label=" MAGI ")
         launcher.add_css_class('launcher-button')
-        # Fixed launcher command to include display
         launcher.connect('clicked', lambda w: self._launch_command(config['launcher']))
         
         workspace_switcher = WorkspaceSwitcher(self._update_manager)
@@ -586,7 +592,6 @@ class MAGIPanel(Gtk.ApplicationWindow):
         
         network = Gtk.Button()
         network.set_child(Gtk.Image.new_from_icon_name("network-wireless-symbolic"))
-        # Fixed network command to include display
         network.connect('clicked', lambda w: self._launch_command('nm-connection-editor'))
         
         clock = Gtk.Label()
@@ -686,6 +691,7 @@ class MAGIPanel(Gtk.ApplicationWindow):
         monitor = display.get_monitors()[0]
         geometry = monitor.get_geometry()
         scale = monitor.get_scale_factor()
+        config = load_config()
         
         width = geometry.width
         height = config['panel_height'] * scale
@@ -756,14 +762,11 @@ class MAGIPanel(Gtk.ApplicationWindow):
 class MAGIApplication(Adw.Application):
     """Main application class"""
     def __init__(self):
-        super().__init__(application_id='dev.magi.shell')
-    
+        super().__init__(application_id='com.system.magi.shell')
+        
     def do_activate(self):
         """Handle application activation"""
         try:
-            # Load config
-            load_config()
-            
             # Create panels
             self.top_panel = MAGIPanel(self, position='top')
             self.bottom_panel = MAGIPanel(self, position='bottom')

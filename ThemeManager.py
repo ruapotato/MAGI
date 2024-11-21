@@ -140,18 +140,33 @@ class ThemeManager:
             color: {theme['panel_fg']};
         }}
         
+        window, 
+        .window {{
+            background-color: {theme['panel_bg']};
+            color: {theme['panel_fg']};
+        }}
+
+        box {{
+            background-color: {theme['panel_bg']};
+        }}
+
         .navigationview {{
             background-color: {theme['panel_bg']};
         }}
 
-        preferencespage > scrolledwindow > viewport > box > clamp > box,
-        preferencespage > box > box,
-        preferencespage box.content,
-        preferencespage > scrolledwindow > viewport {{
+        preferencespage > scrolledwindow > viewport > box > clamp > box {{
+            background-color: {theme['panel_bg']};
+        }}
+
+        preferencespage > box > box {{
             background-color: {theme['panel_bg']};
         }}
 
         preferencespage box.content {{
+            background-color: {theme['panel_bg']};
+        }}
+
+        preferencespage > scrolledwindow > viewport {{
             background-color: {theme['panel_bg']};
         }}
 
@@ -226,19 +241,97 @@ class ThemeManager:
             color: {theme['panel_fg']};
             padding: 6px 10px;
             border-radius: 6px;
-            border: 1px solid alpha(currentColor, 0.1);
-            box-shadow: 0 1px 2px alpha(black, 0.1);
+            border: 1px solid rgba(0, 0, 0, 0.1);
         }}
         
         button:hover {{
             background-color: {theme['button_hover']};
-            transform: translateY(-1px);
-            transition: all 200ms ease;
         }}
         
         button:active {{
             background-color: {theme['button_active']};
-            transform: translateY(0px);
+        }}
+
+        /* Panel buttons */
+        box button {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+            min-height: 24px;
+            margin: 2px;
+        }}
+
+        box button:hover {{
+            background-color: {theme['button_hover']};
+        }}
+
+        box button:active {{
+            background-color: {theme['button_active']};
+        }}
+
+        /* Workspace switcher buttons */
+        box.horizontal > button {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+        }}
+
+        box.horizontal > button:hover {{
+            background-color: {theme['button_hover']};
+        }}
+
+        /* System button styles */
+        button.flat {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+        }}
+
+        button.flat:hover {{
+            background-color: {theme['button_hover']};
+        }}
+
+        button.image-button {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+        }}
+
+        button.text-button {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+        }}
+
+        /* Message buttons */
+        .message-button {{
+            background-color: {theme['button_bg']};
+            color: {theme['panel_fg']};
+            padding: 4px;
+            margin: 2px;
+        }}
+
+        /* Active workspace button */
+        .active-workspace {{
+            background-color: {theme['accent']};
+            color: {theme['selection_fg']};
+        }}
+
+        /* Suggested action button */
+        button.suggested-action {{
+            background-color: {theme['accent']};
+            color: {theme['selection_fg']};
+        }}
+
+        button.suggested-action:hover {{
+            opacity: 0.9;
+        }}
+
+        /* Launcher button */
+        .launcher-button {{
+            background-color: {theme['launcher_bg']};
+            color: {theme['selection_fg']};
+            font-weight: bold;
+            padding: 0 12px;
+        }}
+
+        .launcher-button:hover {{
+            opacity: 0.9;
         }}
 
         /* Entry/TextField Styling */
@@ -253,7 +346,7 @@ class ThemeManager:
         
         entry:focus {{
             border-color: {theme['entry_focus']};
-            box-shadow: 0 0 0 2px alpha({theme['entry_focus']}, 0.3);
+            box-shadow: 0 0 0 2px {theme['entry_focus']};
         }}
 
         /* Header styling */
@@ -262,11 +355,10 @@ class ThemeManager:
             color: {theme['panel_fg']};
         }}
 
-        headerbar * {{
+        headerbar label {{
             color: {theme['panel_fg']};
         }}
 
-        headerbar label,
         headerbar title {{
             color: {theme['panel_fg']};
         }}
@@ -295,7 +387,7 @@ class ThemeManager:
 
         .navigation-sidebar row:selected {{
             background-color: {theme['accent']};
-            color: white;
+            color: {theme['selection_fg']};
         }}
 
         .navigation-sidebar row:hover:not(:selected) {{
@@ -325,10 +417,6 @@ class ThemeManager:
 
         combobox button {{
             background-color: {theme['entry_bg']};
-            color: {theme['entry_fg']};
-        }}
-
-        combobox * {{
             color: {theme['entry_fg']};
         }}
 
@@ -372,12 +460,12 @@ class ThemeManager:
 
         /* Scrollbar styling */
         scrollbar {{
-            background-color: transparent;
+            background: transparent;
         }}
 
         scrollbar slider {{
             background-color: alpha({theme['panel_fg']}, 0.2);
-            border-radius: 999px;
+            border-radius: 9999px;
             min-width: 8px;
             min-height: 8px;
         }}
@@ -388,12 +476,6 @@ class ThemeManager:
 
         scrollbar slider:active {{
             background-color: alpha({theme['panel_fg']}, 0.6);
-        }}
-
-        /* Window styling */
-        window {{
-            background-color: {theme['panel_bg']};
-            color: {theme['panel_fg']};
         }}
 
         /* Message styling for LLM Menu */
@@ -419,7 +501,7 @@ class ThemeManager:
             border-radius: 6px;
         }}
 
-        /* Monitor and Clock labels for Panel */
+        /* Monitor and Clock labels */
         .monitor-label {{
             color: {theme['panel_fg']};
         }}
@@ -431,19 +513,6 @@ class ThemeManager:
         /* Recording state */
         .recording {{
             color: {theme['error']};
-        }}
-
-        /* Workspace buttons */
-        .active-workspace {{
-            background-color: {theme['accent']};
-            color: {theme['selection_fg']};
-        }}
-
-        /* Launcher button */
-        .launcher-button {{
-            background-color: {theme['launcher_bg']};
-            color: {theme['selection_fg']};
-            font-weight: bold;
         }}
         """
     
