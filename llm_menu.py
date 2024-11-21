@@ -13,6 +13,7 @@ import sounddevice as sd
 import numpy as np
 import time
 import subprocess
+from ThemeManager import ThemeManager
 
 class MessageBox(Gtk.Box):
     def __init__(self, text, is_user=True, parent_window=None, is_code=False):
@@ -92,7 +93,7 @@ class MessageBox(Gtk.Box):
         # Update button styling
         for button in button_box:
             button.add_css_class('message-button')
-            button.set_has_frame(False)  # Remove button borders
+            button.set_has_frame(False)
     
     def on_edit_clicked(self, button):
         text = self.label.get_text()
@@ -131,6 +132,9 @@ class MessageBox(Gtk.Box):
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
+                
+        # Register with theme manager
+        ThemeManager().register_window(self)
         
         # Recording state
         self.recording_stream = None
@@ -176,50 +180,52 @@ class MainWindow(Adw.ApplicationWindow):
         self.record_button.set_child(self.mic_icon)
         self.record_button.set_sensitive(True)
         
-        # Try a different approach with click gesture
+        # Click gesture for recording
         click = Gtk.GestureClick.new()
-        click.set_button(1)  # Left mouse button
+        click.set_button(1)
         click.connect('begin', self.start_recording)
         click.connect('end', self.stop_recording)
         self.record_button.add_controller(click)
         
         button_box.append(self.record_button)
-
-                        
+        
         # Send button
         self.send_button = Gtk.Button(label="Send")
         self.send_button.add_css_class('suggested-action')
         button_box.append(self.send_button)
         
+        # Pack everything
         input_box.append(self.entry)
         input_box.append(button_box)
-        
-        # Pack everything
         main_box.append(scroll)
         main_box.append(input_box)
         
         self.set_content(main_box)
         
-        # Focus handling
-        focus_controller = Gtk.EventControllerFocus.new()
-        focus_controller.connect('leave', self.on_focus_lost)
-        self.add_controller(focus_controller)
-
-        # Position window
-        GLib.timeout_add(50, self.setup_position)
-
         # Connect signals
-        self.entry.connect('activate', self.on_send)
-        self.send_button.connect('clicked', self.on_send)
+        self.connect_signals()
         
         # Load history
         self.load_history()
         
-        # Setup keyboard shortcuts
+        # Schedule window positioning
+        GLib.timeout_add(50, self.setup_position)
+
+    def connect_signals(self):
+        # Focus handling
+        focus_controller = Gtk.EventControllerFocus.new()
+        focus_controller.connect('leave', self.on_focus_lost)
+        self.add_controller(focus_controller)
+        
+        # Input handling
+        self.entry.connect('activate', self.on_send)
+        self.send_button.connect('clicked', self.on_send)
+        
+        # Keyboard shortcuts
         key_controller = Gtk.EventControllerKey.new()
         key_controller.connect('key-pressed', self.on_key_pressed)
         self.add_controller(key_controller)
-
+    
     def setup_position(self):
         """Position window at the bottom center of the screen"""
         display = self.get_display()
@@ -231,7 +237,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_default_size(window_width, window_height)
         self.present()
         GLib.idle_add(self.move_and_show_window, x, y)
-
+        return False
+    
     def move_and_show_window(self, x, y):
         """Move the window using wmctrl and fade it in"""
         try:
@@ -240,9 +247,9 @@ class MainWindow(Adw.ApplicationWindow):
             if out:
                 window_id = out.split('\n')[0]
                 # Move window
-                os.system(f"wmctrl -i -r {window_id} -e 0,{x},{y},-1,-1")
-        except:
-            print("Failed to position window - wmctrl or xdotool may not be installed")
+                subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', f'0,{x},{y},-1,-1'], check=True)
+        except Exception as e:
+            print(f"Failed to position window: {e}")
         
         # Start fade in
         GLib.timeout_add(50, self.fade_in_window)
@@ -253,152 +260,21 @@ class MainWindow(Adw.ApplicationWindow):
         current_opacity = self.get_opacity()
         if current_opacity < 1.0:
             self.set_opacity(min(current_opacity + 0.2, 1.0))
-            GLib.timeout_add(10, self.fade_in_window)
-        return False
-        
-    def start_recording(self, gesture, sequence):
-        """Start recording when button is pressed"""
-        if hasattr(self, 'is_transcribing') and self.is_transcribing:
-            return
-            
-        print("Starting recording...")
-        self.is_recording = True
-        if hasattr(self, 'recording_stream') and self.recording_stream:
-            try:
-                self.recording_stream.stop()
-                self.recording_stream.close()
-            except:
-                pass
-            self.recording_stream = None
-            
-        self.audio_data = []
-        self.record_start_time = time.time()
-        
-        # Swap to record icon
-        self.record_button.set_child(self.record_icon)
-        
-        def audio_callback(indata, *args):
-            if hasattr(self, 'audio_data'):
-                self.audio_data.append(indata.copy())
-        
-        try:
-            self.recording_stream = sd.InputStream(
-                callback=audio_callback,
-                channels=1,
-                samplerate=16000,
-                blocksize=1024,
-                dtype=np.float32
-            )
-            self.recording_stream.start()
-            self.record_button.add_css_class('recording')
-            print("Recording stream started successfully")
-        except Exception as e:
-            print(f"Recording Error: {e}")
-            self.recording_stream = None
-            self.record_button.set_child(self.mic_icon)
+            return True  # Continue fading
+        return False  # Stop fading
 
-    def stop_recording(self, gesture, sequence):
-        """Stop recording when button is released"""
-        if hasattr(self, 'is_transcribing') and self.is_transcribing:
-            return
-            
-        print("Stopping recording...")
-        self.is_recording = False
-        recording_duration = time.time() - self.record_start_time
-        
-        # Stop recording first
-        if hasattr(self, 'recording_stream') and self.recording_stream:
-            try:
-                self.recording_stream.stop()
-                self.recording_stream.close()
-                self.recording_stream = None
-            except Exception as e:
-                print(f"Error stopping recording: {e}")
-        
-        # Reset button state
-        self.record_button.set_child(self.mic_icon)
-        self.record_button.remove_css_class('recording')
-        
-        # Handle short recordings
-        if recording_duration < 0.5:
-            print("Recording too short")
-            GLib.idle_add(lambda: subprocess.run(['espeak', "Press and hold to record audio"]))
-            return
-        
-        # Process audio
-        if hasattr(self, 'audio_data') and self.audio_data:
-            try:
-                print("Processing audio...")
-                self.is_transcribing = True
-                self.record_button.set_sensitive(False)
-                
-                # Create a copy of audio data
-                audio_data = np.concatenate(self.audio_data.copy())
-                self.audio_data = []
-                
-                def transcribe():
-                    try:
-                        print("Sending to whisper...")
-                        files = {'audio': ('audio.wav', audio_data.tobytes())}
-                        response = requests.post('http://localhost:5000/transcribe', files=files)
-                        
-                        def handle_response():
-                            self.is_transcribing = False
-                            self.record_button.set_sensitive(True)
-                            
-                            if response.ok:
-                                text = response.json().get('transcription', '')
-                                if text:
-                                    self.entry.set_text(text)
-                                    self.entry.grab_focus()
-                            else:
-                                print(f"Transcription error: {response.status_code}")
-                        
-                        GLib.idle_add(handle_response)
-                    
-                    except Exception as e:
-                        print(f"Transcription error: {e}")
-                        GLib.idle_add(lambda: setattr(self, 'is_transcribing', False))
-                        GLib.idle_add(lambda: self.record_button.set_sensitive(True))
-                
-                # Start transcription in background
-                threading.Thread(target=transcribe, daemon=True).start()
-                
-            except Exception as e:
-                print(f"Audio processing error: {e}")
-                self.is_transcribing = False
-                self.record_button.set_sensitive(True)
-        
-        else:
-            print("No audio data collected")
-            self.record_button.set_sensitive(True)
-
-    def cleanup_recording(self):
-        """Clean up recording resources"""
-        if hasattr(self, 'recording_stream') and self.recording_stream:
-            try:
-                self.recording_stream.stop()
-                self.recording_stream.close()
-                self.recording_stream = None
-            except Exception as e:
-                print(f"Error cleaning up recording stream: {e}")
-        
-        self.audio_data = []
-        self.record_button.remove_css_class('recording')
-
-    
     def on_focus_lost(self, controller):
         """Close window when focus is lost, unless recording or transcribing"""
         if not (self.is_recording or self.is_transcribing):
             self.close()
-
+    
     def on_key_pressed(self, controller, keyval, keycode, state):
         """Handle keyboard shortcuts"""
         if keyval == Gdk.KEY_Escape:
             self.close()
             return True
         return False
-    
+
     def scroll_to_bottom(self):
         def _scroll():
             parent = self.messages_box.get_parent()
@@ -475,6 +351,135 @@ class MainWindow(Adw.ApplicationWindow):
                 
         except Exception as e:
             GLib.idle_add(lambda: self.add_message(f"Error: {str(e)}", False))
+
+    def start_recording(self, gesture, sequence):
+        """Start recording when button is pressed"""
+        if self.is_transcribing:
+            return
+            
+        print("Starting recording...")
+        self.is_recording = True
+        if self.recording_stream:
+            try:
+                self.recording_stream.stop()
+                self.recording_stream.close()
+            except:
+                pass
+            self.recording_stream = None
+            
+        self.audio_data = []
+        self.record_start_time = time.time()
+        
+        # Swap to record icon
+        self.record_button.set_child(self.record_icon)
+        
+        def audio_callback(indata, *args):
+            if hasattr(self, 'audio_data'):
+                self.audio_data.append(indata.copy())
+        
+        try:
+            self.recording_stream = sd.InputStream(
+                callback=audio_callback,
+                channels=1,
+                samplerate=16000,
+                blocksize=1024,
+                dtype=np.float32
+            )
+            self.recording_stream.start()
+            self.record_button.add_css_class('recording')
+            print("Recording stream started successfully")
+        except Exception as e:
+            print(f"Recording Error: {e}")
+            self.recording_stream = None
+    
+    def stop_recording(self, gesture, sequence):
+        """Stop recording when button is released"""
+        if self.is_transcribing:
+            return
+            
+        print("Stopping recording...")
+        self.is_recording = False
+        recording_duration = time.time() - self.record_start_time
+        
+        # Stop recording first
+        if self.recording_stream:
+            try:
+                self.recording_stream.stop()
+                self.recording_stream.close()
+                self.recording_stream = None
+            except Exception as e:
+                print(f"Error stopping recording: {e}")
+        
+        # Reset button state
+        self.record_button.set_child(self.mic_icon)
+        self.record_button.remove_css_class('recording')
+        
+        # Handle short recordings
+        if recording_duration < 0.5:
+            print("Recording too short")
+            GLib.idle_add(lambda: subprocess.run(['espeak', "Press and hold to record audio"]))
+            return
+        
+        # Process audio
+        if self.audio_data:
+            try:
+                print("Processing audio...")
+                self.is_transcribing = True
+                self.record_button.set_sensitive(False)
+                
+                # Create a copy of audio data
+                audio_data = np.concatenate(self.audio_data.copy())
+                self.audio_data = []
+                
+                def transcribe():
+                    try:
+                        print("Sending to whisper...")
+                        files = {'audio': ('audio.wav', audio_data.tobytes())}
+                        response = requests.post('http://localhost:5000/transcribe', files=files)
+                        
+                        def handle_response():
+                            self.is_transcribing = False
+                            self.record_button.set_sensitive(True)
+                            
+                            if response.ok:
+                                text = response.json().get('transcription', '')
+                                if text:
+                                    self.entry.set_text(text)
+                                    self.entry.grab_focus()
+                            else:
+                                print(f"Transcription error: {response.status_code}")
+                        
+                        GLib.idle_add(handle_response)
+                    
+                    except Exception as e:
+                        print(f"Transcription error: {e}")
+                        GLib.idle_add(lambda: setattr(self, 'is_transcribing', False))
+                        GLib.idle_add(lambda: self.record_button.set_sensitive(True))
+                
+                # Start transcription in background
+                threading.Thread(target=transcribe, daemon=True).start()
+                
+            except Exception as e:
+                print(f"Audio processing error: {e}")
+                self.is_transcribing = False
+                self.record_button.set_sensitive(True)
+        
+        else:
+            print("No audio data collected")
+            self.record_button.set_sensitive(True)
+
+    def cleanup_recording(self):
+        """Clean up recording resources"""
+        if self.recording_stream:
+            try:
+                self.recording_stream.stop()
+                self.recording_stream.close()
+                self.recording_stream = None
+            except Exception as e:
+                print(f"Error cleaning up recording stream: {e}")
+        
+        self.audio_data = []
+        self.record_button.remove_css_class('recording')
     
     def load_history(self):
         try:
@@ -508,7 +513,7 @@ class MainWindow(Adw.ApplicationWindow):
 
 class MAGIApplication(Adw.Application):
     def __init__(self):
-        super().__init__(application_id='com.test.app')
+        super().__init__(application_id='com.system.magi.llm')
     
     def do_activate(self):
         win = MainWindow(self)
