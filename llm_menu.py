@@ -128,20 +128,41 @@ class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
         
+        # Start with opacity 0
+        self.set_opacity(0.0)
+        
         self.setup_window()
     
     def setup_position(self):
-        """Position window at the center of the screen"""
+        """Position window at the bottom center of the screen"""
         display = self.get_display()
         monitor = display.get_primary_monitor()
         if monitor:
             geometry = monitor.get_geometry()
             window_width, window_height = self.get_default_size()
             x = geometry.x + (geometry.width - window_width) // 2
-            y = geometry.y + (geometry.height - window_height) // 2
+            y = geometry.y + geometry.height - window_height
             self.set_default_size(window_width, window_height)
-            self.set_size_request(window_width, window_height)
-            #self.set_gravity(Gdk.Gravity.CENTER)
+            # Don't show the window yet
+            self.present()
+            GLib.idle_add(self.move_and_show_window, x, y)
+
+    def move_and_show_window(self, x, y):
+        """Move the window and then make it visible"""
+        window_id = self.get_surface().get_xid()
+        # Move the window while it's still invisible
+        os.system(f"wmctrl -ir {window_id} -e 0,{x},{y},-1,-1")
+        # Add a small delay before showing the window
+        GLib.timeout_add(50, self.fade_in_window)
+        return False
+
+    def fade_in_window(self):
+        """Fade in the window smoothly"""
+        current_opacity = self.get_opacity()
+        if current_opacity < 1.0:
+            self.set_opacity(min(current_opacity + 0.2, 1.0))
+            GLib.timeout_add(10, self.fade_in_window)
+        return False
     
     def setup_window(self):
         self.set_title("MAGI Assistant")
@@ -205,7 +226,7 @@ class MainWindow(Adw.ApplicationWindow):
         
         # Connect signals
         self.entry.connect('activate', self.on_send)
-        send_button.connect('clicked', self.on_send)
+        self.send_button.connect('clicked', self.on_send)
         
         # Load history
         self.load_history()
