@@ -229,37 +229,39 @@ class WindowList(Gtk.Box):
         self._window_buttons = {}
         self._cache = Cache()
         
-        self._update_manager.schedule(
-            'windows',
-            self._update_window_list,
-            UPDATE_INTERVAL
-        )
+        # Start immediate update
+        self._update_window_list()
+        # Schedule regular updates
+        GLib.timeout_add(1000, self._update_window_list)
     
     def _update_window_list(self):
         """Update window list with batching and caching"""
         try:
-            # Get current workspace
-            workspace = self._get_current_workspace()
-            if workspace is None:
-                return
-            
             # Get window list
-            windows = self._get_window_list(workspace)
-            if windows is None:
-                return
-            
-            # Update buttons efficiently
+            output = subprocess.check_output(['wmctrl', '-l']).decode()
             current_windows = set()
-            for window_id, title in windows:
-                current_windows.add(window_id)
-                if window_id not in self._window_buttons:
-                    button = self._button_pool.acquire()
-                    button.set_label(title[:30])
-                    button.connect('clicked', self._activate_window, window_id)
-                    self.append(button)
-                    self._window_buttons[window_id] = button
-                else:
-                    self._window_buttons[window_id].set_label(title[:30])
+            
+            for line in output.splitlines():
+                parts = line.split(None, 3)
+                if len(parts) >= 4:
+                    window_id = parts[0]
+                    workspace = int(parts[1])
+                    title = parts[3]
+                    
+                    # Skip panels and other system windows
+                    if "MAGI" in title or "Desktop" in title:
+                        continue
+                        
+                    current_windows.add(window_id)
+                    if window_id not in self._window_buttons:
+                        button = self._button_pool.acquire()
+                        button.set_label(title[:30])
+                        button.connect('clicked', self._activate_window, window_id)
+                        self.append(button)
+                        self._window_buttons[window_id] = button
+                    else:
+                        # Update existing button title
+                        self._window_buttons[window_id].set_label(title[:30])
             
             # Remove closed windows
             for window_id in list(self._window_buttons.keys()):
@@ -270,61 +272,8 @@ class WindowList(Gtk.Box):
             
         except Exception as e:
             print(f"Window list update error: {e}")
-    
-    def _get_current_workspace(self):
-        """Get current workspace with caching"""
-        workspace = self._cache.get('current_workspace')
-        if workspace is not None:
-            return workspace
         
-        try:
-            output = subprocess.check_output(['wmctrl', '-d']).decode()
-            for line in output.splitlines():
-                if '*' in line:
-                    workspace = int(line.split()[0])
-                    self._cache.set('current_workspace', workspace)
-                    return workspace
-        except Exception as e:
-            print(f"Workspace query error: {e}")
-        return None
-    
-    def _get_window_list(self, current_workspace):
-        """Get window list with caching"""
-        cache_key = f'windows_{current_workspace}'
-        windows = self._cache.get(cache_key)
-        if windows is not None:
-            return windows
-        
-        try:
-            output = subprocess.check_output(['wmctrl', '-l']).decode()
-            windows = []
-            
-            for line in output.splitlines():
-                parts = line.split(None, 3)
-                if len(parts) >= 4:
-                    window_id = parts[0]
-                    workspace = int(parts[1])
-                    title = parts[3]
-                    
-                    if "MAGI" in title or "Desktop" in title:
-                        continue
-                    
-                    if workspace == current_workspace or workspace == -1:
-                        windows.append((window_id, title))
-            
-            self._cache.set(cache_key, windows)
-            return windows
-            
-        except Exception as e:
-            print(f"Window list query error: {e}")
-        return None
-    
-    def _activate_window(self, button, window_id):
-        """Activate window with error handling"""
-        try:
-            subprocess.run(['wmctrl', '-ia', window_id], check=True)
-        except Exception as e:
-            print(f"Window activation error: {e}")
+        return True  # Keep the timeout going
 
 class SystemMonitor(Gtk.Box):
     """Optimized system monitor"""
@@ -349,20 +298,16 @@ class SystemMonitor(Gtk.Box):
             print("NVIDIA monitoring unavailable")
         
         self._cpu_cache = Cache(timeout=1000)
-        self._update_manager.schedule(
-            'system_stats',
-            self._update_stats,
-            UPDATE_INTERVAL
-        )
+        # Start immediate update
+        self._update_stats()
+        # Schedule regular updates with return True
+        GLib.timeout_add(3000, self._update_stats)
     
     def _update_stats(self):
         """Update system stats efficiently"""
         try:
             # Get CPU usage with caching
-            cpu = self._cpu_cache.get('cpu_percent')
-            if cpu is None:
-                cpu = psutil.cpu_percent(interval=None)
-                self._cpu_cache.set('cpu_percent', cpu)
+            cpu = psutil.cpu_percent(interval=None)
             
             # Get memory usage
             mem = psutil.virtual_memory()
@@ -389,6 +334,8 @@ class SystemMonitor(Gtk.Box):
             
         except Exception as e:
             print(f"Stats update error: {e}")
+        
+        return True  # Important: keep the timeout going
 
 class VoiceInputButton(Gtk.Button):
     """Optimized voice input button"""
@@ -619,10 +566,12 @@ class MAGIPanel(Gtk.ApplicationWindow):
         
         def update_clock():
             clock.set_label(time.strftime("%Y-%m-%d %H:%M:%S"))
-            return True
+            return True  # Important: keep the timeout going
         
+        # Start immediate clock update
         update_clock()
-        self._update_manager.schedule('clock', update_clock, 1000)
+        # Schedule regular clock updates
+        GLib.timeout_add(1000, update_clock)
         
         # Pack widgets
         self.box.append(launcher)
