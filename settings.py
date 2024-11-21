@@ -19,12 +19,20 @@ from collections import deque
 MAGI_THEMES = {
     "Plain": {
         "panel_bg": "#ffffff",
-        "panel_fg": "#000000", 
+        "panel_fg": "#000000",
         "button_bg": "#f0f0f0",
         "button_hover": "#e0e0e0",
         "button_active": "#d0d0d0",
-        "launcher_bg": "#215d9c",
-        "accent": "#215d9c"
+        "launcher_bg": "#2c71cc",
+        "accent": "#2c71cc",
+        "entry_bg": "#ffffff",
+        "entry_fg": "#000000",
+        "entry_border": "#cccccc",
+        "entry_focus": "#2c71cc",
+        "selection_bg": "#2c71cc",
+        "selection_fg": "#ffffff",
+        "link": "#0066cc",
+        "error": "#cc0000"
     },
     "Tokyo Night": {
         "panel_bg": "#1a1b26",
@@ -32,8 +40,16 @@ MAGI_THEMES = {
         "button_bg": "#24283b",
         "button_hover": "#414868",
         "button_active": "#565f89",
-        "launcher_bg": "#bb9af7", 
-        "accent": "#7aa2f7"
+        "launcher_bg": "#bb9af7",
+        "accent": "#7aa2f7",
+        "entry_bg": "#1f2335",
+        "entry_fg": "#c0caf5",
+        "entry_border": "#414868",
+        "entry_focus": "#7aa2f7",
+        "selection_bg": "#7aa2f7",
+        "selection_fg": "#1a1b26",
+        "link": "#73daca",
+        "error": "#f7768e"
     },
     "Forest": {
         "panel_bg": "#2b3328",
@@ -42,7 +58,15 @@ MAGI_THEMES = {
         "button_hover": "#4f6146",
         "button_active": "#546c4d",
         "launcher_bg": "#a7c080",
-        "accent": "#83c092"
+        "accent": "#83c092",
+        "entry_bg": "#323d2f",
+        "entry_fg": "#d3c6aa",
+        "entry_border": "#4f6146",
+        "entry_focus": "#a7c080",
+        "selection_bg": "#a7c080",
+        "selection_fg": "#2b3328",
+        "link": "#83c092",
+        "error": "#e67e80"
     }
 }
 
@@ -467,68 +491,146 @@ class MAGISettings(Adw.Application):
     def create_appearance_page(self):
         """Replace the existing appearance page with new theme system"""
         return self.create_theme_section()
-    
+
+
     def apply_magi_theme(self, theme_name):
-        """Apply MAGI-specific theme"""
+        """Apply enhanced MAGI-specific theme"""
         if theme_name not in self.magi_themes:
             return
         
         theme = self.magi_themes[theme_name]
         css = f"""
+        /* Window and General Styling */
         window, window.background {{
             background-color: {theme['panel_bg']};
             color: {theme['panel_fg']};
         }}
         
+        /* Button Styling */
         button {{
             background-color: {theme['button_bg']};
             color: {theme['panel_fg']};
-            padding: 4px 8px;
-            border-radius: 4px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid alpha(currentColor, 0.1);
+            box-shadow: 0 1px 2px alpha(black, 0.1);
         }}
         
         button:hover {{
             background-color: {theme['button_hover']};
+            transform: translateY(-1px);
+            transition: all 200ms ease;
         }}
         
         button:active {{
             background-color: {theme['button_active']};
+            transform: translateY(0px);
         }}
         
         .launcher-button {{
             background-color: {theme['launcher_bg']};
-            color: {theme['panel_fg']};
-            padding: 0 8px;
-            border-radius: 4px;
+            color: {'#ffffff' if theme_name != "Plain" else '#ffffff'};
+            font-weight: bold;
+            padding: 0 12px;
+            border: none;
         }}
         
         .message-button {{
-            background-color: {theme['button_bg']};
+            background-color: transparent;
             color: {theme['panel_fg']};
             padding: 4px;
-            border-radius: 4px;
+            border: none;
+            box-shadow: none;
         }}
         
+        .message-button:hover {{
+            background-color: alpha({theme['button_hover']}, 0.5);
+        }}
+        
+        /* Entry/TextField Styling */
+        entry {{
+            background-color: {theme['entry_bg']};
+            color: {theme['entry_fg']};
+            border: 1px solid {theme['entry_border']};
+            border-radius: 6px;
+            padding: 8px;
+            box-shadow: inset 0 1px 2px alpha(black, 0.1);
+            caret-color: {theme['entry_fg']};
+        }}
+        
+        entry:focus {{
+            border-color: {theme['entry_focus']};
+            box-shadow: 0 0 0 2px alpha({theme['entry_focus']}, 0.3);
+        }}
+        
+        /* Selection Styling */
+        *:selected {{
+            background-color: {theme['selection_bg']};
+            color: {theme['selection_fg']};
+        }}
+        
+        /* Message Styling */
         .user-message {{
-            background-color: {theme['button_bg']};
+            background-color: alpha({theme['button_bg']}, 0.8);
             color: {theme['panel_fg']};
             padding: 12px;
-            border-radius: 8px;
+            border-radius: 12px;
+            border: 1px solid alpha(currentColor, 0.1);
+            box-shadow: 0 2px 4px alpha(black, 0.1);
+            margin: 4px 8px;
         }}
         
         .assistant-message {{
             background-color: alpha({theme['accent']}, 0.1);
             color: {theme['panel_fg']};
             padding: 12px;
-            border-radius: 8px;
+            border-radius: 12px;
+            border: 1px solid alpha({theme['accent']}, 0.2);
+            box-shadow: 0 2px 4px alpha(black, 0.1);
+            margin: 4px 8px;
         }}
         
         .code-block {{
-            background-color: {theme['panel_bg']};
-            color: {theme['panel_fg']};
+            background-color: {theme['entry_bg']};
+            color: {theme['entry_fg']};
             padding: 12px;
             border-radius: 8px;
             font-family: monospace;
+            border: 1px solid {theme['entry_border']};
+        }}
+        
+        /* Link Styling */
+        link {{
+            color: {theme['link']};
+        }}
+        
+        link:hover {{
+            text-decoration: underline;
+        }}
+        
+        /* Error and Warning Styling */
+        .error {{
+            color: {theme['error']};
+        }}
+        
+        /* Scrollbar Styling */
+        scrollbar {{
+            background-color: transparent;
+        }}
+        
+        scrollbar slider {{
+            background-color: alpha({theme['panel_fg']}, 0.2);
+            border-radius: 999px;
+            min-width: 8px;
+            min-height: 8px;
+        }}
+        
+        scrollbar slider:hover {{
+            background-color: alpha({theme['panel_fg']}, 0.4);
+        }}
+        
+        scrollbar slider:active {{
+            background-color: alpha({theme['panel_fg']}, 0.6);
         }}
         """
         
@@ -1198,24 +1300,48 @@ class MAGISettings(Adw.Application):
         
         GLib.timeout_add(100, apply_theme)
     
-    def save_config(self, config=None):
-        """Save configuration to file"""
-        if config is None:
-            config = self.config
-        os.makedirs(self.config_dir, exist_ok=True)
-        with open(self.config_file, 'w') as f:
-            json.dump(config, f, indent=4)
+    def save_config(self):
+        """Save current configuration to file"""
+        try:
+            os.makedirs(self.config_dir, exist_ok=True)
+            with open(os.path.join(self.config_dir, "config.json"), 'w') as f:
+                json.dump(self.config, f, indent=4)
+        except Exception as e:
+            print(f"Error saving config: {e}")
     
     def load_config(self):
-        """Load configuration from file"""
+        """Load configuration from file with defaults"""
+        config_path = os.path.join(self.config_dir, "config.json")
         try:
-            with open(self.config_file, 'r') as f:
+            with open(config_path, 'r') as f:
                 config = json.load(f)
-                # Ensure sample rate has a valid value
-                if 'sample_rate' not in config:
-                    config['sample_rate'] = 16000
+                # Ensure all required fields exist
+                default_config = {
+                    'panel_height': 28,
+                    'workspace_count': 4,
+                    'enable_effects': True,
+                    'enable_ai': True,
+                    'terminal': 'mate-terminal',
+                    'launcher': 'mate-panel --run-dialog',
+                    'background': '/usr/share/magi/backgrounds/default.png',
+                    'ollama_model': 'mistral',
+                    'whisper_endpoint': 'http://localhost:5000/transcribe',
+                    'sample_rate': 16000,
+                    'default_microphone': None,
+                    'gtk3_theme': 'Default',
+                    'gtk4_scheme': 0,
+                    'magi_theme': 'Plain'
+                }
+                
+                # Update config with any missing defaults
+                for key, value in default_config.items():
+                    if key not in config:
+                        config[key] = value
+                
                 return config
-        except FileNotFoundError:
+                
+        except (FileNotFoundError, json.JSONDecodeError):
+            # Create default config
             default_config = {
                 'panel_height': 28,
                 'workspace_count': 4,
@@ -1228,9 +1354,18 @@ class MAGISettings(Adw.Application):
                 'whisper_endpoint': 'http://localhost:5000/transcribe',
                 'sample_rate': 16000,
                 'default_microphone': None,
-                'gtk_theme': 'Default'
+                'gtk3_theme': 'Default',
+                'gtk4_scheme': 0,
+                'magi_theme': 'Plain'
             }
-            self.save_config(default_config)
+            
+            # Ensure config directory exists
+            os.makedirs(self.config_dir, exist_ok=True)
+            
+            # Save default config
+            with open(config_path, 'w') as f:
+                json.dump(default_config, f, indent=4)
+            
             return default_config
 
 def main():
