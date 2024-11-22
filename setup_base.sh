@@ -142,6 +142,8 @@ echo "Copying MAGI files..."
 cp ../magi_shell.py config/includes.chroot/opt/magi/
 cp ../server.py config/includes.chroot/opt/magi/
 cp ../llm_menu.py config/includes.chroot/opt/magi/
+cp ../settings.py config/includes.chroot/opt/magi/
+cp ../ThemeManager.py config/includes.chroot/opt/magi/
 cp ../start.sh config/includes.chroot/opt/magi/
 
 # Create GRUB theme

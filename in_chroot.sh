@@ -59,7 +59,14 @@ apt-get install -y \
     network-manager \
     network-manager-gnome \
     pulseaudio \
-    pavucontrol
+    pavucontrol\
+    compiz\
+    compiz-core\
+    compiz-mate\
+    compiz-plugins\
+    compiz-plugins-extra\
+    compiz-plugins-main\
+    compizconfig-settings-manager\
 
 # Install system-wide pip packages needed for core functionality
 pip3 install --break-system-packages \
