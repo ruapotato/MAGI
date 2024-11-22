@@ -199,8 +199,8 @@ for i in {1..30}; do
 done
 
 # Ensure window manager is running first
-if ! pgrep compiz >/dev/null; then
-    compiz --replace &
+if ! pgrep marco >/dev/null; then
+    marco --replace &
     sleep 2
 fi
 

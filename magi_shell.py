@@ -390,22 +390,43 @@ class VoiceInputButton(Gtk.Button):
                 pass
             self._stream = None
         
+        # Load current mic device from config
+        config_path = os.path.expanduser("~/.config/magi/config.json")
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+                device_id = config.get('default_microphone')
+                sample_rate = config.get('sample_rate', 16000)
+        except Exception as e:
+            print(f"Config load error: {e}")
+            device_id = None
+            sample_rate = 16000
+        
         self.set_child(self._record_icon)
         
         try:
             self._stream = sd.InputStream(
+                device=device_id,
                 callback=self._audio_callback,
                 channels=1,
-                samplerate=16000,
+                samplerate=sample_rate,
                 blocksize=1024,
                 dtype=np.float32
             )
             self._stream.start()
             self.add_css_class('recording')
+            print(f"Recording started with device {device_id} at {sample_rate}Hz")
         except Exception as e:
             print(f"Recording error: {e}")
             self._recording = False
             self.set_child(self._mic_icon)
+            dialog = Adw.MessageDialog.new(
+                self.get_root(),
+                "Recording Error",
+                str(e)
+            )
+            dialog.add_response("ok", "OK")
+            dialog.present()
     
     def _audio_callback(self, indata, *args):
         """Handle audio input"""
@@ -437,7 +458,11 @@ class VoiceInputButton(Gtk.Button):
         # Handle short recordings
         if duration < 0.5:
             print("Recording too short")
-            subprocess.run(['espeak', "Press and hold to record audio"])
+            # Use GLib.timeout_add to prevent multiple simultaneous speech
+            if not hasattr(self, '_speaking'):
+                self._speaking = True
+                subprocess.run(['espeak', "Press and hold to record audio"])
+                GLib.timeout_add(2000, self._reset_speaking_state)
             return
         
         # Process audio
@@ -462,6 +487,12 @@ class VoiceInputButton(Gtk.Button):
                 print(f"Audio processing error: {e}")
                 self._transcribing = False
                 self.set_sensitive(True)
+
+    def _reset_speaking_state(self):
+        """Reset the speaking state flag"""
+        if hasattr(self, '_speaking'):
+            delattr(self, '_speaking')
+        return False
     
     def _transcribe_audio(self, audio_data):
         """Transcribe audio in background"""

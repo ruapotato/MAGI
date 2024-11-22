@@ -370,6 +370,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.audio_data = []
         self.record_start_time = time.time()
         
+        # Load current mic device from config
+        config_path = os.path.expanduser("~/.config/magi/config.json")
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+                device_id = config.get('default_microphone')
+                sample_rate = config.get('sample_rate', 16000)
+        except Exception as e:
+            print(f"Config load error: {e}")
+            device_id = None
+            sample_rate = 16000
+        
         # Swap to record icon
         self.record_button.set_child(self.record_icon)
         
@@ -379,24 +391,32 @@ class MainWindow(Adw.ApplicationWindow):
         
         try:
             self.recording_stream = sd.InputStream(
+                device=device_id,
                 callback=audio_callback,
                 channels=1,
-                samplerate=16000,
+                samplerate=sample_rate,
                 blocksize=1024,
                 dtype=np.float32
             )
             self.recording_stream.start()
             self.record_button.add_css_class('recording')
-            print("Recording stream started successfully")
+            print(f"Recording started with device {device_id} at {sample_rate}Hz")
         except Exception as e:
             print(f"Recording Error: {e}")
             self.recording_stream = None
+            dialog = Adw.MessageDialog.new(
+                self,
+                "Recording Error",
+                str(e)
+            )
+            dialog.add_response("ok", "OK")
+            dialog.present()
     
     def stop_recording(self, gesture, sequence):
         """Stop recording when button is released"""
         if self.is_transcribing:
             return
-            
+                
         print("Stopping recording...")
         self.is_recording = False
         recording_duration = time.time() - self.record_start_time
@@ -417,7 +437,10 @@ class MainWindow(Adw.ApplicationWindow):
         # Handle short recordings
         if recording_duration < 0.5:
             print("Recording too short")
-            GLib.idle_add(lambda: subprocess.run(['espeak', "Press and hold to record audio"]))
+            if not hasattr(self, '_speaking'):
+                self._speaking = True
+                subprocess.run(['espeak', "Press and hold to record audio"])
+                GLib.timeout_add(2000, self._reset_speaking_state)
             return
         
         # Process audio
@@ -467,6 +490,13 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             print("No audio data collected")
             self.record_button.set_sensitive(True)
+
+
+    def _reset_speaking_state(self):
+        """Reset the speaking state flag"""
+        if hasattr(self, '_speaking'):
+            delattr(self, '_speaking')
+        return False
 
     def cleanup_recording(self):
         """Clean up recording resources"""
