@@ -573,23 +573,21 @@ class MAGIPanel(Gtk.ApplicationWindow):
         )
     
     def _setup_window(self):
-        """Set up window properties"""
-        # Get initial geometry
         display = self.get_display()
         monitor = display.get_monitors()[0]
         geometry = monitor.get_geometry()
         scale = monitor.get_scale_factor()
         
-        # Set dimensions
         self.panel_width = geometry.width
         config = load_config()
-        self.panel_height = config['panel_height'] * scale
         
-        # Set size constraints
+        # Add extra padding for panels
+        base_height = config['panel_height'] * scale
+        self.panel_height = base_height + (8 if self.position == 'bottom' else 4)
+        
         self.set_size_request(self.panel_width, self.panel_height)
         self.set_default_size(self.panel_width, self.panel_height)
         
-        # Set up main box
         self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         self.box.set_margin_start(2)
         self.box.set_margin_end(2)
@@ -806,27 +804,35 @@ class MAGIPanel(Gtk.ApplicationWindow):
             print(f"Geometry update error: {e}")
     
     def _set_geometry(self, window_id):
-        """Set window geometry and struts"""
+        """Set window geometry and struts based on actual window size"""
         display = self.get_display()
         monitor = display.get_monitors()[0]
         geometry = monitor.get_geometry()
         scale = monitor.get_scale_factor()
-        config = load_config()
+        
+        # Get actual window size after rendering
+        try:
+            output = subprocess.check_output(['xwininfo', '-id', window_id]).decode()
+            for line in output.splitlines():
+                if 'Height:' in line:
+                    actual_height = int(line.split()[-1])
+                    break
+        except:
+            actual_height = self.panel_height
         
         width = geometry.width
-        height = config['panel_height'] * scale
         x = geometry.x
-        y = geometry.y if self.position == 'top' else geometry.y + geometry.height - height
+        y = geometry.y if self.position == 'top' else geometry.y + geometry.height - actual_height
         
         # Set position and size
         subprocess.run(['xdotool', 'windowmove', window_id, str(x), str(y)])
-        subprocess.run(['xdotool', 'windowsize', window_id, str(width), str(height)])
+        subprocess.run(['xdotool', 'windowsize', window_id, str(width), str(actual_height)])
         
-        # Set struts
+        # Set struts with actual height
         if self.position == 'top':
-            struts = f'0, 0, {height}, 0, 0, 0, 0, 0, {x}, {x + width}, 0, 0'
+            struts = f'0, 0, {actual_height}, 0, 0, 0, 0, 0, {x}, {x + width}, 0, 0'
         else:
-            struts = f'0, 0, 0, {height}, 0, 0, 0, 0, 0, 0, {x}, {x + width}'
+            struts = f'0, 0, 0, {actual_height}, 0, 0, 0, 0, 0, 0, {x}, {x + width}'
         
         subprocess.run([
             'xprop', '-id', window_id,
