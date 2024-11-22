@@ -9,7 +9,7 @@ MAGI OS is an experimental Linux distribution that deeply integrates AI capabili
 ## Key Features
 - 🧠 Local LLM integration via Ollama
 - 🎤 Voice interface with Whisper
-- 🖥️ Custom GTK-based shell
+- 🖥️ Custom GTK4-based shell
 - 🔒 Privacy-focused (all AI runs locally)
 - ⚡ NVIDIA GPU acceleration support
 
