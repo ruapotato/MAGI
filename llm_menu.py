@@ -22,15 +22,12 @@ class MessageBox(Gtk.Box):
         self.is_user = is_user
         self.is_code = is_code
         
-        # Message container
         msg_container = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.append(msg_container)
         
-        # Content box
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         msg_container.append(content_box)
         
-        # Text label
         self.label = Gtk.Label(label=text)
         self.label.set_wrap(not is_code)
         self.label.set_max_width_chars(80 if is_code else 60)
@@ -41,7 +38,6 @@ class MessageBox(Gtk.Box):
         if is_code:
             self.label.set_markup("<tt>" + GLib.markup_escape_text(text) + "</tt>")
         
-        # Apply style classes
         if is_code:
             self.label.add_css_class('code-block')
         else:
@@ -49,48 +45,39 @@ class MessageBox(Gtk.Box):
         
         content_box.append(self.label)
         
-        # Button container
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         button_box.set_halign(Gtk.Align.END if is_user else Gtk.Align.START)
         content_box.append(button_box)
         
-        # Add buttons based on message type
         if is_code:
-            # Copy button for code
             copy_btn = Gtk.Button.new_from_icon_name("edit-copy-symbolic")
             copy_btn.connect('clicked', self.on_copy_clicked)
             button_box.append(copy_btn)
             
-            # Run button for commands
             if not text.strip().startswith(('import ', 'def ', 'class ')):
                 run_btn = Gtk.Button.new_from_icon_name("media-playback-start-symbolic")
                 run_btn.connect('clicked', self.on_run_clicked)
                 button_box.append(run_btn)
         
         elif is_user:
-            # Edit button for user messages
             edit_btn = Gtk.Button.new_from_icon_name("document-edit-symbolic")
             edit_btn.connect('clicked', self.on_edit_clicked)
             button_box.append(edit_btn)
         
         else:
-            # Read button for assistant messages
             read_btn = Gtk.Button.new_from_icon_name("audio-speakers-symbolic")
             read_btn.connect('clicked', self.on_read_clicked)
             button_box.append(read_btn)
             
-            # Copy button for assistant messages
             copy_btn = Gtk.Button.new_from_icon_name("edit-copy-symbolic")
             copy_btn.connect('clicked', self.on_copy_clicked)
             button_box.append(copy_btn)
         
-        # Delete button for non-code messages
         if not is_code:
             delete_btn = Gtk.Button.new_from_icon_name("edit-delete-symbolic")
             delete_btn.connect('clicked', self.on_delete_clicked)
             button_box.append(delete_btn)
         
-        # Update button styling
         for button in button_box:
             button.add_css_class('message-button')
             button.set_has_frame(False)
@@ -132,11 +119,9 @@ class MessageBox(Gtk.Box):
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
-                
-        # Register with theme manager
+        
         ThemeManager().register_window(self)
         
-        # Recording state
         self.recording_stream = None
         self.audio_data = []
         self.record_start_time = 0
@@ -150,14 +135,19 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_title("MAGI Assistant")
         self.set_default_size(800, 600)
         
-        # Main layout
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         main_box.set_margin_start(16)
         main_box.set_margin_end(16)
         main_box.set_margin_top(16)
         main_box.set_margin_bottom(16)
         
-        # Chat history area
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        toolbar.set_margin_bottom(8)
+        
+        clear_button = Gtk.Button(label="Clear Chat")
+        clear_button.connect('clicked', self.clear_history)
+        toolbar.append(clear_button)
+        
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll.set_vexpand(True)
@@ -165,22 +155,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.messages_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         scroll.set_child(self.messages_box)
         
-        # Input area
         input_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         self.entry = Gtk.Entry()
         self.entry.set_hexpand(True)
         
-        # Button box for voice and send buttons
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         
-        # Voice button
         self.record_button = Gtk.Button()
         self.mic_icon = Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic")
         self.record_icon = Gtk.Image.new_from_icon_name("media-record-symbolic")
         self.record_button.set_child(self.mic_icon)
         self.record_button.set_sensitive(True)
         
-        # Click gesture for recording
         click = Gtk.GestureClick.new()
         click.set_button(1)
         click.connect('begin', self.start_recording)
@@ -189,47 +175,38 @@ class MainWindow(Adw.ApplicationWindow):
         
         button_box.append(self.record_button)
         
-        # Send button
         self.send_button = Gtk.Button(label="Send")
         self.send_button.add_css_class('suggested-action')
         button_box.append(self.send_button)
         
-        # Pack everything
         input_box.append(self.entry)
         input_box.append(button_box)
+        main_box.append(toolbar)
         main_box.append(scroll)
         main_box.append(input_box)
         
         self.set_content(main_box)
         
-        # Connect signals
         self.connect_signals()
-        
-        # Load history
         self.load_history()
         
-        # Schedule window positioning
         GLib.timeout_add(50, self.setup_position)
 
     def connect_signals(self):
-        # Focus handling
         focus_controller = Gtk.EventControllerFocus.new()
         focus_controller.connect('leave', self.on_focus_lost)
         self.add_controller(focus_controller)
         
-        # Input handling
         self.entry.connect('activate', self.on_send)
         self.send_button.connect('clicked', self.on_send)
         
-        # Keyboard shortcuts
         key_controller = Gtk.EventControllerKey.new()
         key_controller.connect('key-pressed', self.on_key_pressed)
         self.add_controller(key_controller)
     
     def setup_position(self):
-        """Position window at the bottom center of the screen"""
         display = self.get_display()
-        monitor = display.get_monitors()[0]  # Primary monitor
+        monitor = display.get_monitors()[0]
         geometry = monitor.get_geometry()
         window_width, window_height = self.get_default_size()
         x = geometry.x + (geometry.width - window_width) // 2
@@ -240,36 +217,29 @@ class MainWindow(Adw.ApplicationWindow):
         return False
     
     def move_and_show_window(self, x, y):
-        """Move the window using wmctrl and fade it in"""
         try:
-            # Get window ID
             out = subprocess.check_output(['xdotool', 'search', '--name', '^MAGI Assistant$']).decode().strip()
             if out:
                 window_id = out.split('\n')[0]
-                # Move window
                 subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', f'0,{x},{y},-1,-1'], check=True)
         except Exception as e:
             print(f"Failed to position window: {e}")
         
-        # Start fade in
         GLib.timeout_add(50, self.fade_in_window)
         return False
 
     def fade_in_window(self):
-        """Fade in the window smoothly"""
         current_opacity = self.get_opacity()
         if current_opacity < 1.0:
             self.set_opacity(min(current_opacity + 0.2, 1.0))
-            return True  # Continue fading
-        return False  # Stop fading
+            return True
+        return False
 
     def on_focus_lost(self, controller):
-        """Close window when focus is lost, unless recording or transcribing"""
         if not (self.is_recording or self.is_transcribing):
             self.close()
     
     def on_key_pressed(self, controller, keyval, keycode, state):
-        """Handle keyboard shortcuts"""
         if keyval == Gdk.KEY_Escape:
             self.close()
             return True
@@ -296,10 +266,24 @@ class MainWindow(Adw.ApplicationWindow):
             self.add_message(text, True)
             self.entry.set_text("")
             threading.Thread(target=self.send_to_ollama, args=(text,)).start()
-    
+
     def send_to_ollama(self, prompt):
         try:
-            # Create initial message box for live output
+            context = self.load_context()
+            
+            history = []
+            for child in self.messages_box:
+                if isinstance(child, MessageBox):
+                    role = "user" if child.is_user else "assistant"
+                    history.append(f"{role}: {child.label.get_text()}")
+            
+            conversation = ""
+            if context:
+                conversation += f"{context}\n\n"
+            if history:
+                conversation += "Previous conversation:\n" + "\n".join(history) + "\n\n"
+            conversation += f"user: {prompt}"
+            
             live_box = MessageBox("...", False, self)
             self.messages_box.append(live_box)
             self.scroll_to_bottom()
@@ -308,7 +292,7 @@ class MainWindow(Adw.ApplicationWindow):
             
             response = requests.post('http://localhost:11434/api/generate',
                                    json={'model': 'mistral',
-                                        'prompt': prompt},
+                                        'prompt': conversation},
                                    stream=True)
             
             if response.ok:
@@ -324,14 +308,11 @@ class MainWindow(Adw.ApplicationWindow):
                                     live_box.label.set_text(full_response)
                                     self.scroll_to_bottom()
                                 GLib.idle_add(update)
-                                        
                         except json.JSONDecodeError:
                             continue
                 
-                # Split response into parts
                 def split_and_create_boxes():
                     self.messages_box.remove(live_box)
-                    
                     is_code = False
                     parts = full_response.split('```')
                     
@@ -347,13 +328,30 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.idle_add(split_and_create_boxes)
             
             else:
-                GLib.idle_add(lambda: self.add_message(f"Error: HTTP {response.status_code}", False))
+                error_msg = f"Error: HTTP {response.status_code}"
+                GLib.idle_add(lambda: self.add_message(error_msg, False))
                 
-        except Exception as e:
-            GLib.idle_add(lambda: self.add_message(f"Error: {str(e)}", False))
+        except Exception as error:
+            error_msg = f"Error: {str(error)}"
+            GLib.idle_add(lambda: self.add_message(error_msg, False))
+
+    def load_context(self):
+        try:
+            with open('/tmp/MAGI/current_context.txt', 'r') as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            return ""
+
+    def clear_history(self, widget=None):
+        while (child := self.messages_box.get_first_child()):
+            self.messages_box.remove(child)
+        self.save_history()
+        try:
+            os.remove('/tmp/MAGI/chat_history.json')
+        except FileNotFoundError:
+            pass
 
     def start_recording(self, gesture, sequence):
-        """Start recording when button is pressed"""
         if self.is_transcribing:
             return
             
@@ -370,7 +368,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.audio_data = []
         self.record_start_time = time.time()
         
-        # Load current mic device from config
         config_path = os.path.expanduser("~/.config/magi/config.json")
         try:
             with open(config_path) as f:
@@ -382,7 +379,6 @@ class MainWindow(Adw.ApplicationWindow):
             device_id = None
             sample_rate = 16000
         
-        # Swap to record icon
         self.record_button.set_child(self.record_icon)
         
         def audio_callback(indata, *args):
@@ -413,7 +409,6 @@ class MainWindow(Adw.ApplicationWindow):
             dialog.present()
     
     def stop_recording(self, gesture, sequence):
-        """Stop recording when button is released"""
         if self.is_transcribing:
             return
                 
@@ -421,7 +416,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.is_recording = False
         recording_duration = time.time() - self.record_start_time
         
-        # Stop recording first
         if self.recording_stream:
             try:
                 self.recording_stream.stop()
@@ -430,11 +424,9 @@ class MainWindow(Adw.ApplicationWindow):
             except Exception as e:
                 print(f"Error stopping recording: {e}")
         
-        # Reset button state
         self.record_button.set_child(self.mic_icon)
         self.record_button.remove_css_class('recording')
         
-        # Handle short recordings
         if recording_duration < 0.5:
             print("Recording too short")
             if not hasattr(self, '_speaking'):
@@ -443,14 +435,12 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.timeout_add(2000, self._reset_speaking_state)
             return
         
-        # Process audio
         if self.audio_data:
             try:
                 print("Processing audio...")
                 self.is_transcribing = True
                 self.record_button.set_sensitive(False)
                 
-                # Create a copy of audio data
                 audio_data = np.concatenate(self.audio_data.copy())
                 self.audio_data = []
                 
@@ -479,7 +469,6 @@ class MainWindow(Adw.ApplicationWindow):
                         GLib.idle_add(lambda: setattr(self, 'is_transcribing', False))
                         GLib.idle_add(lambda: self.record_button.set_sensitive(True))
                 
-                # Start transcription in background
                 threading.Thread(target=transcribe, daemon=True).start()
                 
             except Exception as e:
@@ -491,15 +480,12 @@ class MainWindow(Adw.ApplicationWindow):
             print("No audio data collected")
             self.record_button.set_sensitive(True)
 
-
     def _reset_speaking_state(self):
-        """Reset the speaking state flag"""
         if hasattr(self, '_speaking'):
             delattr(self, '_speaking')
         return False
 
     def cleanup_recording(self):
-        """Clean up recording resources"""
         if self.recording_stream:
             try:
                 self.recording_stream.stop()
