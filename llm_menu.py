@@ -247,11 +247,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def scroll_to_bottom(self):
         def _scroll():
-            parent = self.messages_box.get_parent()
-            if isinstance(parent, Gtk.ScrolledWindow):
-                adj = parent.get_vadjustment()
-                adj.set_value(adj.get_upper() - adj.get_page_size())
-        GLib.idle_add(_scroll)
+            adj = self.messages_box.get_parent().get_vadjustment()
+            adj.set_value(adj.get_upper() - adj.get_page_size())
+            return False
+        GLib.timeout_add(100, _scroll)
     
     def add_message(self, text, is_user=True):
         msg_box = MessageBox(text, is_user, self)
