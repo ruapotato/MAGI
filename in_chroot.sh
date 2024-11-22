@@ -59,7 +59,8 @@ apt-get install -y \
     network-manager \
     network-manager-gnome \
     pulseaudio \
-    pavucontrol
+    pavucontrol \
+    xclip
 
 # Install system-wide pip packages needed for core functionality
 pip3 install --break-system-packages \

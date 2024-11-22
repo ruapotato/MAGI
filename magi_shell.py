@@ -186,9 +186,23 @@ class WorkspaceSwitcher(Gtk.Box):
         )
     
     def _switch_workspace(self, button, workspace_num):
-        """Switch workspace with error handling"""
+        """Switch workspace with proper window manager interaction"""
         try:
-            subprocess.run(['wmctrl', '-s', str(workspace_num)], check=True)
+            # Get current workspace first
+            output = subprocess.check_output(['wmctrl', '-d']).decode()
+            current = None
+            for line in output.splitlines():
+                if '*' in line:
+                    current = int(line.split()[0])
+                    break
+            
+            if current != workspace_num:
+                # Use both wmctrl and xdotool for better compatibility
+                subprocess.run(['wmctrl', '-s', str(workspace_num)], check=True)
+                subprocess.run(['xdotool', 'set_desktop', str(workspace_num)], check=True)
+                
+                # Force window manager update
+                GLib.timeout_add(100, self._update_current_workspace)
         except Exception as e:
             print(f"Workspace switch error: {e}")
     
@@ -588,6 +602,64 @@ class MAGIPanel(Gtk.ApplicationWindow):
         else:
             self._setup_bottom_panel()
     
+    
+    def create_llm_interface_button(self):
+        """Create context-aware LLM button with persistent selection state"""
+        button = Gtk.Button(label="Ask anything...")
+        button.add_css_class('llm-button')
+        button.set_hexpand(True)
+        button.set_halign(Gtk.Align.CENTER)
+        
+        context = {
+            'window_name': None,
+            'selection': None,
+            'last_update': 0
+        }
+        
+        def update_context():
+            try:
+                current_time = time.monotonic()
+                if current_time - context['last_update'] < 0.1:
+                    return True
+                    
+                output = subprocess.check_output(['xdotool', 'getactivewindow', 'getwindowname']).decode().strip()
+                if output and output != "MAGI Assistant":
+                    # Window changed
+                    if output != context['window_name']:
+                        context['window_name'] = output
+                        button.set_label(f"Ask about {context['window_name']}...")
+                        with open('/tmp/MAGI/current_context.txt', 'w') as f:
+                            f.write(f"Context: Working with {context['window_name']}")
+                    
+                    try:
+                        selection = subprocess.check_output(
+                            ['xclip', '-o', '-selection', 'primary'],
+                            stderr=subprocess.DEVNULL
+                        ).decode().strip()
+                        if selection and selection != context['selection']:
+                            context['selection'] = selection
+                            button.set_label("Ask about selection...")
+                            os.makedirs('/tmp/MAGI', exist_ok=True)
+                            with open('/tmp/MAGI/current_context.txt', 'w') as f:
+                                f.write(f"Context: Selected text in {context['window_name']}:\n{selection}")
+                    except subprocess.CalledProcessError:
+                        context['selection'] = None
+                
+                context['last_update'] = current_time
+                return True
+                
+            except Exception as e:
+                print(f"Context update error: {e}")
+                return True
+        
+        GLib.timeout_add(250, update_context)
+        
+        button.connect('clicked', lambda w:
+            subprocess.Popen([sys.executable, 
+                os.path.join(os.path.dirname(__file__), 'llm_menu.py')]))
+        
+        return button
+    
     def _launch_command(self, command):
         """Launch command with proper display environment"""
         try:
@@ -644,7 +716,13 @@ class MAGIPanel(Gtk.ApplicationWindow):
         self.box.append(clock)
     
     def _setup_bottom_panel(self):
-        """Set up bottom panel widgets"""
+        """Set up bottom panel widgets with centered buttons"""
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.set_hexpand(True)
+        
+        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        button_box.set_halign(Gtk.Align.CENTER)
+        button_box.set_hexpand(True)
         
         settings_button = Gtk.Button()
         settings_button.set_child(Gtk.Image.new_from_icon_name("preferences-system-symbolic"))  
@@ -652,18 +730,7 @@ class MAGIPanel(Gtk.ApplicationWindow):
             subprocess.Popen([sys.executable, 
                 os.path.join(os.path.dirname(__file__), 'settings.py')]))
         
-        center_box = Gtk.CenterBox()
-        self.box.append(center_box)
-        
-        button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        
-        llm_button = Gtk.Button(label="Ask anything...")
-        llm_button.add_css_class('llm-button')
-        llm_button.set_hexpand(True)
-        llm_button.set_halign(Gtk.Align.CENTER)
-        llm_button.connect('clicked', lambda w:
-            subprocess.Popen([sys.executable, 
-                os.path.join(os.path.dirname(__file__), 'llm_menu.py')]))
+        llm_button = self.create_llm_interface_button()
         
         tts_button = Gtk.Button()
         tts_button.set_child(Gtk.Image.new_from_icon_name("audio-speakers-symbolic"))
@@ -676,7 +743,9 @@ class MAGIPanel(Gtk.ApplicationWindow):
         button_box.append(tts_button)
         button_box.append(voice_button)
         
-        center_box.set_center_widget(button_box)
+        box.append(button_box)
+        self.box.append(box)
+   
     
     def _speak_selection(self, button):
         """Handle TTS button click"""
@@ -705,13 +774,22 @@ class MAGIPanel(Gtk.ApplicationWindow):
         try:
             window_id = self._get_window_id()
             if window_id:
-                # Set window type and properties
-                subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,sticky,above'])
-                subprocess.run(['wmctrl', '-i', '-r', window_id, '-T', f'MAGI Panel ({self.position})'])
+                # Set window type first
+                subprocess.run([
+                    'xprop', '-id', window_id,
+                    '-f', '_NET_WM_WINDOW_TYPE', '32a',
+                    '-set', '_NET_WM_WINDOW_TYPE', '_NET_WM_WINDOW_TYPE_DOCK'
+                ], check=True)
                 
-                # Set struts and position
+                # Set struts before other properties
                 self._set_geometry(window_id)
-                self._set_window_type(window_id)
+                
+                # Set window properties after struts
+                subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,sticky,above'], check=True)
+                subprocess.run(['wmctrl', '-i', '-r', window_id, '-T', f'MAGI Panel ({self.position})'], check=True)
+                
+                # Force window manager to acknowledge changes
+                subprocess.run(['wmctrl', '-i', '-a', window_id], check=True)
         except Exception as e:
             print(f"Window property setup error: {e}")
     
