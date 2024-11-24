@@ -177,11 +177,6 @@ class ModelManager(Gtk.ApplicationWindow):
         self.whisper_indicator = Gtk.Label(label="●")
         whisper_header.append(self.whisper_indicator)
         whisper_header.append(Gtk.Label(label="WHISPER"))
-        whisper_header.set_hexpand(True)
-        
-        self.whisper_reload = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        self.whisper_reload.connect('clicked', self.on_whisper_reload)
-        whisper_header.append(self.whisper_reload)
         whisper_box.append(whisper_header)
         
         # Progress bar
@@ -208,11 +203,6 @@ class ModelManager(Gtk.ApplicationWindow):
         ollama_header.append(self.ollama_indicator)
         model_name = self.config.get('ollama_model', 'mistral').upper()
         ollama_header.append(Gtk.Label(label=f"OLLAMA ({model_name})"))
-        ollama_header.set_hexpand(True)
-        
-        self.ollama_reload = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
-        self.ollama_reload.connect('clicked', self.on_ollama_reload)
-        ollama_header.append(self.ollama_reload)
         ollama_box.append(ollama_header)
         
         # Progress bar
@@ -241,6 +231,7 @@ class ModelManager(Gtk.ApplicationWindow):
         main_box.append(self.last_check_label)
         
         self.set_child(main_box)
+
     
     def load_config(self):
         """Load MAGI configuration"""
@@ -264,35 +255,55 @@ class ModelManager(Gtk.ApplicationWindow):
         def verify_models():
             # Check Whisper
             try:
-                # Test actual transcription
-                audio_data = np.zeros(16000, dtype=np.float32)  # 1 second of silence
-                files = {'audio': ('test.wav', audio_data.tobytes())}
-                response = requests.post('http://localhost:5000/transcribe', 
-                                      files=files, timeout=5)
-                if response.ok:
-                    GLib.idle_add(self.set_whisper_status, "Running", 100, "Model verified")
-                else:
-                    GLib.idle_add(self.set_whisper_status, "Error", 0, "Model verification failed")
+                GLib.idle_add(self.set_whisper_status, "Checking", 50, "Testing connection...")
+                
+                try:
+                    audio_data = np.zeros(8000, dtype=np.float32)  # 0.5 seconds of silence
+                    files = {'audio': ('test.wav', audio_data.tobytes())}
+                    response = requests.post('http://localhost:5000/transcribe', 
+                                        files=files, timeout=60)
+                    if response.ok:
+                        GLib.idle_add(self.set_whisper_status, "Running", 100, "Model verified")
+                    else:
+                        GLib.idle_add(self.set_whisper_status, "Error", 0, "Server error")
+                except requests.exceptions.ConnectionError:
+                    GLib.idle_add(self.set_whisper_status, "Error", 0, "Server not running")
+                except requests.exceptions.Timeout:
+                    GLib.idle_add(self.set_whisper_status, "Error", 0, "Server timeout")
+                
             except Exception as e:
                 print(f"Whisper verification error: {e}")
                 GLib.idle_add(self.set_whisper_status, "Error", 0, str(e))
             
-            # Check Ollama
+            # Check Ollama - simplified check that won't overwrite a working status
             try:
-                model_name = self.config.get('ollama_model', 'mistral')
-                # Test quick generation
-                response = requests.post(
-                    'http://localhost:11434/api/generate',
-                    json={'model': model_name, 'prompt': 'test', 'raw': True},
-                    timeout=5
-                )
-                if response.ok:
-                    GLib.idle_add(self.set_ollama_status, "Running", 100, "Model verified")
+                if self.ollama_status != "Running":  # Only check if not already running
+                    print("DEBUG: Checking Ollama status...")
+                    response = requests.post(
+                        'http://localhost:11434/api/generate',
+                        json={
+                            'model': self.config.get('ollama_model', 'mistral'),
+                            'prompt': 'Hi',
+                            'options': {
+                                'num_predict': 1,
+                                'temperature': 0
+                            }
+                        },
+                        timeout=60  # Shorter timeout for verification
+                    )
+                    
+                    if response.ok:
+                        GLib.idle_add(self.set_ollama_status, "Running", 100, "Model verified")
+                    else:
+                        GLib.idle_add(self.set_ollama_status, "Error", 0, 
+                                    f"Model test failed: {response.text}")
                 else:
-                    GLib.idle_add(self.set_ollama_status, "Error", 0, "Model verification failed")
+                    print("DEBUG: Ollama already running, skipping check")
+                    
             except Exception as e:
                 print(f"Ollama verification error: {e}")
-                GLib.idle_add(self.set_ollama_status, "Error", 0, str(e))
+                if self.ollama_status != "Running":  # Don't overwrite working status
+                    GLib.idle_add(self.set_ollama_status, "Error", 0, str(e))
             
             # Update last check time
             check_time = time.strftime("%H:%M:%S")
@@ -333,47 +344,52 @@ class ModelManager(Gtk.ApplicationWindow):
             self.set_whisper_status("Error", 0, f"Failed to start: {e}")
     
     def start_ollama_server(self):
-        """Start Ollama server"""
+        """Initialize Ollama connection"""
         try:
-            # Check if port is in use and clean up
-            if is_port_in_use(11434):
-                print("Cleaning up old Ollama server...")
-                kill_process_on_port(11434)
-                time.sleep(1)  # Give the port time to be released
-            
-            subprocess.Popen(['ollama', 'serve'])
-            time.sleep(2)  # Give it time to start
-            threading.Thread(target=self.load_ollama_model, daemon=True).start()
-            self.set_ollama_status("Starting", 0, "Starting server...")
+            # Don't try to start/stop Ollama service - just check if it's responding
+            try:
+                response = requests.get('http://localhost:11434/api/version', timeout=5)
+                if response.ok:
+                    # Server is running, proceed to model check
+                    threading.Thread(target=self.load_ollama_model, daemon=True).start()
+                    self.set_ollama_status("Starting", 0, "Checking model status...")
+                else:
+                    self.set_ollama_status("Error", 0, "Ollama service not responding")
+            except requests.exceptions.ConnectionError:
+                self.set_ollama_status("Error", 0, "Ollama service not running")
+                print("Ollama service not running - please start with: systemctl start ollama")
         except Exception as e:
-            print(f"Failed to start Ollama server: {e}")
-            self.set_ollama_status("Error", 0, f"Failed to start: {e}")
+            print(f"Ollama initialization error: {e}")
+            self.set_ollama_status("Error", 0, f"Failed to connect: {e}")
+
     
     def load_ollama_model(self):
         """Load Ollama model"""
         try:
             model_name = self.config.get('ollama_model', 'mistral')
+            print(f"\nDEBUG: Starting Ollama model check for {model_name}")
             
-            # Pull model
-            response = requests.post(
-                'http://localhost:11434/api/pull',
-                json={'name': model_name},
-                stream=True
-            )
+            # First verify if model exists using ollama list endpoint
+            try:
+                print("DEBUG: Checking model list...")
+                response = requests.get('http://localhost:11434/api/tags')
+                print(f"DEBUG: Tags response status: {response.status_code}")
+                if response.ok:
+                    models = response.json().get('models', [])
+                    print(f"DEBUG: Found models: {[m['name'] for m in models]}")
+                    model_exists = any(m['name'].startswith(model_name) for m in models)
+                    print(f"DEBUG: Model exists check: {model_exists}")
+                    
+                    if not model_exists:
+                        print("DEBUG: Model not found in list, but continuing anyway...")
+                else:
+                    print(f"DEBUG: Failed to get model list: {response.text}")
+                    
+            except Exception as e:
+                print(f"DEBUG: Error checking model list: {e}")
             
-            for line in response.iter_lines():
-                if line:
-                    data = json.loads(line)
-                    if 'status' in data:
-                        GLib.idle_add(
-                            self.set_ollama_status,
-                            "Loading",
-                            int(data.get('completed', 0) * 80 / 100),  # Scale to 80%
-                            data['status']
-                        )
-                    if 'completed' in data:
-                        break
-            
+            # Test model with simple generation
+            print("\nDEBUG: Starting model test...")
             GLib.idle_add(
                 self.set_ollama_status,
                 "Loading",
@@ -381,29 +397,43 @@ class ModelManager(Gtk.ApplicationWindow):
                 "Testing model..."
             )
             
-            # Test model
+            test_request = {
+                'model': model_name,
+                'prompt': 'Hi',
+                'options': {
+                    'num_predict': 1,
+                    'temperature': 0
+                }
+            }
+            print(f"DEBUG: Sending test request: {test_request}")
+            
             response = requests.post(
                 'http://localhost:11434/api/generate',
-                json={'model': model_name, 'prompt': 'Hello!'}
+                json=test_request,
+                timeout=1800  # 30 minute timeout for first load
             )
             
+            print(f"DEBUG: Generation response status: {response.status_code}")
             if response.ok:
+                print("DEBUG: Model test successful")
                 GLib.idle_add(
                     self.set_ollama_status,
                     "Running",
                     100,
-                    "Model loaded and ready"
+                    "Model ready"
                 )
             else:
+                error_msg = response.text if response.text else "Unknown error"
+                print(f"DEBUG: Model test failed: {error_msg}")
                 GLib.idle_add(
                     self.set_ollama_status,
                     "Error",
                     0,
-                    "Model test failed"
+                    f"Model test failed: {error_msg}"
                 )
             
         except Exception as e:
-            print(f"Ollama load error: {e}")
+            print(f"DEBUG: Unexpected error in load_ollama_model: {e}")
             GLib.idle_add(
                 self.set_ollama_status,
                 "Error",
@@ -463,18 +493,17 @@ class ModelManager(Gtk.ApplicationWindow):
         self.whisper_progress = progress
         self.whisper_progress_bar.set_fraction(progress / 100)
         self.whisper_status_label.set_text(message)
-        self.whisper_reload.set_sensitive(status in ["Running", "Error"])
         self.update_status_displays()
     
     def set_ollama_status(self, status, progress=0, message=""):
         """Update Ollama status display"""
+        print(f"DEBUG: Setting Ollama status - Status: {status}, Progress: {progress}, Message: {message}")
         self.ollama_status = status
         self.ollama_progress = progress
         self.ollama_progress_bar.set_fraction(progress / 100)
         self.ollama_status_label.set_text(message)
-        self.ollama_reload.set_sensitive(status in ["Running", "Error"])
         self.update_status_displays()
-    
+        
     def update_status_displays(self):
         """Update status indicators"""
         def update_indicator(indicator, status):
@@ -517,6 +546,7 @@ class ModelManager(Gtk.ApplicationWindow):
     
     def cleanup(self):
         """Clean up resources"""
+        # Only clean up Whisper server
         if self.whisper_server_process:
             try:
                 self.whisper_server_process.terminate()
@@ -526,13 +556,12 @@ class ModelManager(Gtk.ApplicationWindow):
             except Exception as e:
                 print(f"Error cleaning up Whisper server: {e}")
         
-        # Clean up ports
-        for port in [5000, 11434]:
-            if is_port_in_use(port):
-                try:
-                    kill_process_on_port(port)
-                except Exception as e:
-                    print(f"Error cleaning up port {port}: {e}")
+        # Clean up Whisper port only
+        if is_port_in_use(5000):
+            try:
+                kill_process_on_port(5000)
+            except Exception as e:
+                print(f"Error cleaning up Whisper port: {e}")
 
 class ModelManagerApplication(Adw.Application):
     def __init__(self):
