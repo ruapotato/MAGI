@@ -72,14 +72,22 @@ class ModelManager(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
         
+        # Remove window decorations
+        self.set_decorated(False)
+        
+        # Connect realize signal for window properties
+        self.connect('realize', self._on_realize)
+        
         # First, clean up any running servers
         if is_port_in_use(5000):
             print("Cleaning up old Whisper server...")
             kill_process_on_port(5000)
+            time.sleep(1)  # Give time for cleanup
         
         if is_port_in_use(11434):
             print("Cleaning up old Ollama server...")
             kill_process_on_port(11434)
+            time.sleep(1)  # Give time for cleanup
         
         # Load config first
         self.load_config()
@@ -97,6 +105,9 @@ class ModelManager(Gtk.ApplicationWindow):
         self.ollama_status = "Starting"
         self.ollama_progress = 0
         
+        # Track if verification is in progress
+        self.verification_in_progress = False
+        
         # Start GPU monitoring
         GLib.timeout_add(3000, self.update_gpu_status)
         
@@ -110,6 +121,28 @@ class ModelManager(Gtk.ApplicationWindow):
         
         # Initial status check after startup
         GLib.timeout_add(5000, self.initial_status_check)
+    
+    def _on_realize(self, widget):
+        """Set window properties after window is realized"""
+        def set_window_properties():
+            try:
+                # Get window ID
+                output = subprocess.check_output(
+                    ['xdotool', 'search', '--name', '^MAGI Model Status$']
+                ).decode().strip()
+                
+                if output:
+                    window_id = output.split('\n')[0]
+                    # Set window to stay below others and stick to all workspaces
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,below,sticky'], check=True)
+                    # Make window appear on all workspaces
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-t', '-1'], check=True)
+            except Exception as e:
+                print(f"Failed to set window properties: {e}")
+            return False
+        
+        # Give window time to be created before setting properties
+        GLib.timeout_add(100, set_window_properties)
     
     def initial_status_check(self):
         """Perform initial status check after startup"""
@@ -220,45 +253,60 @@ class ModelManager(Gtk.ApplicationWindow):
     
     def check_model_status(self):
         """Perform a deep check of both models"""
+        if self.verification_in_progress:
+            print("Verification already in progress, skipping...")
+            return
+        
         print("Performing deep status check...")
+        self.verification_in_progress = True
         self.check_button.set_sensitive(False)
         
-        # Check Whisper
-        try:
-            # Test actual transcription
-            audio_data = np.zeros(16000, dtype=np.float32)  # 1 second of silence
-            files = {'audio': ('test.wav', audio_data.tobytes())}
-            response = requests.post('http://localhost:5000/transcribe', 
-                                  files=files, timeout=5)
-            if response.ok:
-                self.set_whisper_status("Running", 100, "Model verified")
-            else:
-                self.set_whisper_status("Error", 0, "Model verification failed")
-        except Exception as e:
-            print(f"Whisper verification error: {e}")
-            self.set_whisper_status("Error", 0, str(e))
+        def verify_models():
+            # Check Whisper
+            try:
+                # Test actual transcription
+                audio_data = np.zeros(16000, dtype=np.float32)  # 1 second of silence
+                files = {'audio': ('test.wav', audio_data.tobytes())}
+                response = requests.post('http://localhost:5000/transcribe', 
+                                      files=files, timeout=5)
+                if response.ok:
+                    GLib.idle_add(self.set_whisper_status, "Running", 100, "Model verified")
+                else:
+                    GLib.idle_add(self.set_whisper_status, "Error", 0, "Model verification failed")
+            except Exception as e:
+                print(f"Whisper verification error: {e}")
+                GLib.idle_add(self.set_whisper_status, "Error", 0, str(e))
+            
+            # Check Ollama
+            try:
+                model_name = self.config.get('ollama_model', 'mistral')
+                # Test quick generation
+                response = requests.post(
+                    'http://localhost:11434/api/generate',
+                    json={'model': model_name, 'prompt': 'test', 'raw': True},
+                    timeout=5
+                )
+                if response.ok:
+                    GLib.idle_add(self.set_ollama_status, "Running", 100, "Model verified")
+                else:
+                    GLib.idle_add(self.set_ollama_status, "Error", 0, "Model verification failed")
+            except Exception as e:
+                print(f"Ollama verification error: {e}")
+                GLib.idle_add(self.set_ollama_status, "Error", 0, str(e))
+            
+            # Update last check time
+            check_time = time.strftime("%H:%M:%S")
+            GLib.idle_add(self.last_check_label.set_text, f"Last checked: {check_time}")
+            
+            # Reset verification state
+            GLib.idle_add(self._reset_verification_state)
         
-        # Check Ollama
-        try:
-            model_name = self.config.get('ollama_model', 'mistral')
-            # Test quick generation
-            response = requests.post(
-                'http://localhost:11434/api/generate',
-                json={'model': model_name, 'prompt': 'test', 'raw': True},
-                timeout=5
-            )
-            if response.ok:
-                self.set_ollama_status("Running", 100, "Model verified")
-            else:
-                self.set_ollama_status("Error", 0, "Model verification failed")
-        except Exception as e:
-            print(f"Ollama verification error: {e}")
-            self.set_ollama_status("Error", 0, str(e))
-        
-        # Update last check time
-        check_time = time.strftime("%H:%M:%S")
-        self.last_check_label.set_text(f"Last checked: {check_time}")
-        
+        # Run verification in background
+        threading.Thread(target=verify_models, daemon=True).start()
+    
+    def _reset_verification_state(self):
+        """Reset verification state and button"""
+        self.verification_in_progress = False
         self.check_button.set_sensitive(True)
     
     def start_whisper_server(self):
@@ -365,12 +413,15 @@ class ModelManager(Gtk.ApplicationWindow):
     
     def on_whisper_reload(self, button):
         """Handle Whisper reload button click"""
+        if self.verification_in_progress:
+            return
+            
         button.set_sensitive(False)
         
         # Clean up existing server
         if self.whisper_server_process:
-            self.whisper_server_process.terminate()
             try:
+                self.whisper_server_process.terminate()
                 self.whisper_server_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.whisper_server_process.kill()
@@ -390,8 +441,12 @@ class ModelManager(Gtk.ApplicationWindow):
     
     def on_ollama_reload(self, button):
         """Handle Ollama reload button click"""
+        if self.verification_in_progress:
+            return
+            
         button.set_sensitive(False)
         
+        # Clean up existing server
         if is_port_in_use(11434):
             kill_process_on_port(11434)
             time.sleep(1)
@@ -463,19 +518,23 @@ class ModelManager(Gtk.ApplicationWindow):
     def cleanup(self):
         """Clean up resources"""
         if self.whisper_server_process:
-            self.whisper_server_process.terminate()
             try:
+                self.whisper_server_process.terminate()
                 self.whisper_server_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.whisper_server_process.kill()
+            except Exception as e:
+                print(f"Error cleaning up Whisper server: {e}")
         
         # Clean up ports
-        if is_port_in_use(5000):
-            kill_process_on_port(5000)
-        if is_port_in_use(11434):
-            kill_process_on_port(11434)
+        for port in [5000, 11434]:
+            if is_port_in_use(port):
+                try:
+                    kill_process_on_port(port)
+                except Exception as e:
+                    print(f"Error cleaning up port {port}: {e}")
 
-class ModelManagerApplication(Gtk.Application):
+class ModelManagerApplication(Adw.Application):
     def __init__(self):
         super().__init__(application_id='com.system.magi.models')
     
@@ -493,20 +552,23 @@ class ModelManagerApplication(Gtk.Application):
         x = geometry.x + (geometry.width - win_width) // 2
         y = geometry.y + geometry.height - win_height - 20
         
-        def move_window():
+        def set_window_properties():
             try:
                 # Get window ID
                 output = subprocess.check_output(['xdotool', 'search', '--name', '^MAGI Model Status$']).decode().strip()
                 if output:
                     window_id = output.split('\n')[0]
+                    # Set window properties
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,below,sticky'], check=True)
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-t', '-1'], check=True)
                     # Move window
                     subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', f'0,{x},{y},-1,-1'], check=True)
             except Exception as e:
-                print(f"Failed to position window: {e}")
+                print(f"Failed to set window properties: {e}")
             return False
         
-        # Give the window time to appear before moving it
-        GLib.timeout_add(100, move_window)
+        # Give the window time to appear before setting properties
+        GLib.timeout_add(100, set_window_properties)
 
 def main():
     """Main entry point"""
