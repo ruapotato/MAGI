@@ -84,25 +84,12 @@ start_magi_shell() {
     done
 }
 
-# Start ollama
-nohup ollama run mistral > "$HOME/.cache/magi/logs/mistral.log" 2>&1 &
-
-# Start Whisper server if not already running
-if ! pgrep -f "python.*server.py" > /dev/null; then
-    echo "Starting Whisper server..."
-    source "$SCRIPT_DIR/ears_pyenv/bin/activate"
-    python "$SCRIPT_DIR/server.py" > "$HOME/.cache/magi/logs/whisper_server.log" 2>&1 &
-    deactivate
-    
-    # Wait for server to start
-    for i in {1..30}; do
-        if curl -s http://localhost:5000/health >/dev/null 2>&1; then
-            echo "Whisper server started successfully"
-            break
-        fi
-        sleep 0.1
-    done
-fi
+# Function to start model manager
+start_model_manager() {
+    local log_file="$HOME/.cache/magi/logs/model_manager.log"
+    echo "Starting Model Manager at $(date)" >> "$log_file"
+    python3 "$SCRIPT_DIR/model_manager.py" 2>&1 >> "$log_file" &
+}
 
 # Ensure DBUS is running first
 if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
@@ -233,6 +220,10 @@ fi
 if [ -f "/usr/share/magi/backgrounds/default.png" ]; then
     feh --bg-fill "/usr/share/magi/backgrounds/default.png" || true
 fi
+
+# Start model manager (this will handle Ollama and Whisper)
+echo "Starting Model Manager..."
+start_model_manager
 
 # Start MAGI shell with crash handling
 start_magi_shell &
