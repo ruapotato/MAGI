@@ -283,70 +283,34 @@ class MAGISettings(Adw.Application):
         self.save_config()
     
     def create_audio_page(self):
-        """Create audio settings page with proper settings loading"""
+        """Create simplified audio settings page that redirects to system settings"""
         page = Adw.PreferencesPage()
         page.set_hexpand(True)
         
-        # Microphone settings group
-        mic_group = Adw.PreferencesGroup(title="Microphone Settings")
-        page.add(mic_group)
+        # Audio settings group
+        audio_group = Adw.PreferencesGroup(
+            title="Audio Settings",
+            description="Configure system-wide audio settings including microphone selection"
+        )
+        page.add(audio_group)
         
-        # Microphone selection
-        mic_row = Adw.ComboRow(
-            title="Default Microphone",
-            subtitle="Select the microphone to use for voice input"
+        # Button to open system sound settings
+        settings_row = Adw.ActionRow(
+            title="System Sound Settings",
+            subtitle="Open the system sound control panel to configure audio devices"
         )
         
-        # Create microphone model
-        mic_store = Gtk.StringList()
-        self.mic_devices = []  # Store as instance variable for access in handlers
-        current_mic = self.config.get('default_microphone')
-        current_idx = 0
+        open_button = Gtk.Button(label="Open Settings")
+        open_button.connect('clicked', self.open_sound_settings)
+        open_button.add_css_class("flat")
+        settings_row.add_suffix(open_button)
+        audio_group.add(settings_row)
         
-        devices = sd.query_devices()
-        for i, device in enumerate(devices):
-            if device['max_input_channels'] > 0:
-                mic_store.append(device['name'])
-                self.mic_devices.append(i)
-                if i == current_mic:
-                    current_idx = len(self.mic_devices) - 1
-        
-        mic_row.set_model(mic_store)
-        if current_mic is not None:
-            mic_row.set_selected(current_idx)
-        
-        mic_row.connect('notify::selected', self.on_microphone_changed)
-        mic_group.add(mic_row)
-        
-        # Live visualizer
-        visualizer_row = Adw.ActionRow(
-            title="Microphone Level",
-            subtitle="Live audio input visualization"
+        # Sample rate setting (keep this as it's needed for voice recognition)
+        rate_group = Adw.PreferencesGroup(
+            title="Voice Recognition Settings",
+            description="Configure audio sampling rate for voice recognition"
         )
-        
-        # Create visualizer widget
-        visualizer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        visualizer_box.set_margin_top(12)
-        visualizer_box.set_margin_bottom(12)
-        visualizer_box.set_margin_end(12)
-        
-        self.level_bar = Gtk.LevelBar()
-        self.level_bar.set_min_value(0)
-        self.level_bar.set_max_value(1)
-        self.level_bar.add_offset_value("low", 0.3)
-        self.level_bar.add_offset_value("high", 0.8)
-        self.level_bar.set_size_request(200, 20)
-        
-        self.level_label = Gtk.Label(label="Level: -∞ dB")
-        
-        visualizer_box.append(self.level_bar)
-        visualizer_box.append(self.level_label)
-        
-        visualizer_row.add_suffix(visualizer_box)
-        mic_group.add(visualizer_row)
-        
-        # Sample rate settings
-        rate_group = Adw.PreferencesGroup(title="Sample Rate Settings")
         page.add(rate_group)
         
         rate_row = Adw.ComboRow(
@@ -354,27 +318,49 @@ class MAGISettings(Adw.Application):
             subtitle="Audio recording sample rate in Hz"
         )
         
-        # Load sample rate from config
-        current_rate = self.config.get('sample_rate', 16000)
-        
         rate_store = Gtk.StringList()
-        self.sample_rates = [8000, 16000, 22050, 44100, 48000]
+        self.sample_rates = [16000, 22050, 44100, 48000]
         
-        selected_idx = 0
-        for i, rate in enumerate(self.sample_rates):
+        current_rate = self.config.get('sample_rate', 16000)
+        selected_idx = self.sample_rates.index(current_rate) if current_rate in self.sample_rates else 0
+        
+        for rate in self.sample_rates:
             rate_store.append(f"{rate} Hz")
-            if rate == current_rate:
-                selected_idx = i
         
         rate_row.set_model(rate_store)
         rate_row.set_selected(selected_idx)
         rate_row.connect('notify::selected', self.on_sample_rate_changed)
         rate_group.add(rate_row)
         
-        # Start audio monitoring with current settings
-        self.start_audio_monitor()
-        
         return page
+    
+    def open_sound_settings(self, button):
+        """Try to open system sound settings using available tools"""
+        try:
+            # Try MATE volume control first
+            subprocess.run(['mate-volume-control'], check=True)
+        except FileNotFoundError:
+            try:
+                # Try pavucontrol as fallback
+                subprocess.run(['pavucontrol'], check=True)
+            except FileNotFoundError:
+                # If neither is available, show error dialog
+                dialog = Adw.MessageDialog.new(
+                    self.win,
+                    "Error Opening Sound Settings",
+                    "Could not find mate-volume-control or pavucontrol. Please install one of these packages to configure audio settings."
+                )
+                dialog.add_response("ok", "OK")
+                dialog.present()
+        except Exception as e:
+            # Show error if launch fails
+            dialog = Adw.MessageDialog.new(
+                self.win,
+                "Error Opening Sound Settings",
+                str(e)
+            )
+            dialog.add_response("ok", "OK")
+            dialog.present()
     
     def create_ai_page(self):
         """Create AI settings page with dynamic model selection"""

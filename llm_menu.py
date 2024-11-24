@@ -15,6 +15,35 @@ import time
 import subprocess
 from ThemeManager import ThemeManager
 
+
+def load_config():
+    """Load configuration from JSON file"""
+    config_path = os.path.expanduser("~/.config/magi/config.json")
+    try:
+        with open(config_path) as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load config ({e}), using defaults")
+        default_config = {
+            'panel_height': 28,
+            'workspace_count': 4,
+            'enable_effects': True,
+            'enable_ai': True,
+            'terminal': 'mate-terminal',
+            'launcher': 'mate-panel --run-dialog',
+            'background': '/usr/share/magi/backgrounds/default.png',
+            'ollama_model': 'mistral',
+            'whisper_endpoint': 'http://localhost:5000/transcribe',
+            'sample_rate': 16000
+        }
+        try:
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            with open(config_path, 'w') as f:
+                json.dump(default_config, f, indent=4)
+        except Exception as e:
+            print(f"Warning: Could not save config: {e}")
+        return default_config
+
 class MessageBox(Gtk.Box):
     def __init__(self, text, is_user=True, parent_window=None, is_code=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -367,38 +396,30 @@ class MainWindow(Adw.ApplicationWindow):
         self.audio_data = []
         self.record_start_time = time.time()
         
-        config_path = os.path.expanduser("~/.config/magi/config.json")
+        # Use system default audio input
         try:
-            with open(config_path) as f:
-                config = json.load(f)
-                device_id = config.get('default_microphone')
-                sample_rate = config.get('sample_rate', 16000)
-        except Exception as e:
-            print(f"Config load error: {e}")
-            device_id = None
-            sample_rate = 16000
-        
-        self.record_button.set_child(self.record_icon)
-        
-        def audio_callback(indata, *args):
-            if hasattr(self, 'audio_data'):
-                self.audio_data.append(indata.copy())
-        
-        try:
+            config = load_config()
+            sample_rate = config.get('sample_rate', 16000)
+            
+            def audio_callback(indata, *args):
+                if hasattr(self, 'audio_data'):
+                    self.audio_data.append(indata.copy())
+            
             self.recording_stream = sd.InputStream(
-                device=device_id,
-                callback=audio_callback,
                 channels=1,
-                samplerate=sample_rate,
+                callback=audio_callback,
                 blocksize=1024,
+                samplerate=sample_rate,
                 dtype=np.float32
             )
             self.recording_stream.start()
             self.record_button.add_css_class('recording')
-            print(f"Recording started with device {device_id} at {sample_rate}Hz")
+            self.record_button.set_child(self.record_icon)
+            print(f"Recording started with default device at {sample_rate}Hz")
         except Exception as e:
             print(f"Recording Error: {e}")
             self.recording_stream = None
+            self.record_button.set_child(self.mic_icon)
             dialog = Adw.MessageDialog.new(
                 self,
                 "Recording Error",
@@ -440,14 +461,17 @@ class MainWindow(Adw.ApplicationWindow):
                 self.is_transcribing = True
                 self.record_button.set_sensitive(False)
                 
+                # Create a copy of audio data to process
                 audio_data = np.concatenate(self.audio_data.copy())
                 self.audio_data = []
                 
                 def transcribe():
                     try:
                         print("Sending to whisper...")
+                        config = load_config()
+                        endpoint = config.get('whisper_endpoint', 'http://localhost:5000/transcribe')
                         files = {'audio': ('audio.wav', audio_data.tobytes())}
-                        response = requests.post('http://localhost:5000/transcribe', files=files)
+                        response = requests.post(endpoint, files=files)
                         
                         def handle_response():
                             self.is_transcribing = False

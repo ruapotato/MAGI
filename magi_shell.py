@@ -360,7 +360,7 @@ class SystemMonitor(Gtk.Box):
         return True
 
 class VoiceInputButton(Gtk.Button):
-    """Optimized voice input button"""
+    """Optimized voice input button using system default audio"""
     def __init__(self):
         super().__init__()
         
@@ -387,7 +387,7 @@ class VoiceInputButton(Gtk.Button):
         self.add_controller(click)
     
     def _start_recording(self, gesture, sequence):
-        """Start audio recording"""
+        """Start audio recording with system default device"""
         if self._transcribing:
             return
         
@@ -404,32 +404,22 @@ class VoiceInputButton(Gtk.Button):
                 pass
             self._stream = None
         
-        # Load current mic device from config
-        config_path = os.path.expanduser("~/.config/magi/config.json")
+        # Use system default audio input
         try:
-            with open(config_path) as f:
-                config = json.load(f)
-                device_id = config.get('default_microphone')
-                sample_rate = config.get('sample_rate', 16000)
-        except Exception as e:
-            print(f"Config load error: {e}")
-            device_id = None
-            sample_rate = 16000
-        
-        self.set_child(self._record_icon)
-        
-        try:
+            config = load_config()
+            sample_rate = config.get('sample_rate', 16000)
+            
             self._stream = sd.InputStream(
-                device=device_id,
-                callback=self._audio_callback,
                 channels=1,
-                samplerate=sample_rate,
+                callback=self._audio_callback,
                 blocksize=1024,
+                samplerate=sample_rate,
                 dtype=np.float32
             )
             self._stream.start()
+            self.set_child(self._record_icon)
             self.add_css_class('recording')
-            print(f"Recording started with device {device_id} at {sample_rate}Hz")
+            print(f"Recording started with default device at {sample_rate}Hz")
         except Exception as e:
             print(f"Recording error: {e}")
             self._recording = False
@@ -472,7 +462,6 @@ class VoiceInputButton(Gtk.Button):
         # Handle short recordings
         if duration < 0.5:
             print("Recording too short")
-            # Use GLib.timeout_add to prevent multiple simultaneous speech
             if not hasattr(self, '_speaking'):
                 self._speaking = True
                 subprocess.run(['espeak', "Press and hold to record audio"])
@@ -501,11 +490,45 @@ class VoiceInputButton(Gtk.Button):
                 print(f"Audio processing error: {e}")
                 self._transcribing = False
                 self.set_sensitive(True)
-
+    
     def _reset_speaking_state(self):
         """Reset the speaking state flag"""
         if hasattr(self, '_speaking'):
             delattr(self, '_speaking')
+        return False
+    
+    def _transcribe_audio(self, audio_data):
+        """Transcribe audio in background"""
+        config = load_config()
+        try:
+            print("Sending to whisper...")
+            endpoint = config.get('whisper_endpoint', 'http://localhost:5000/transcribe')
+            files = {'audio': ('audio.wav', audio_data.tobytes())}
+            response = requests.post(endpoint, files=files)
+            
+            GLib.idle_add(self._handle_transcription, response)
+            
+        except Exception as e:
+            print(f"Transcription error: {e}")
+            GLib.idle_add(self._reset_state)
+    
+    def _handle_transcription(self, response):
+        """Handle transcription response"""
+        try:
+            if response.ok:
+                text = response.json().get('transcription', '')
+                if text:
+                    subprocess.run(['xdotool', 'type', text], check=True)
+        except Exception as e:
+            print(f"Transcription handling error: {e}")
+        finally:
+            self._reset_state()
+        return False
+    
+    def _reset_state(self):
+        """Reset button state"""
+        self._transcribing = False
+        self.set_sensitive(True)
         return False
     
     def _transcribe_audio(self, audio_data):
