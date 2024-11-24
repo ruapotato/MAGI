@@ -15,6 +15,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 app = Flask(__name__)
 progress_file = '/tmp/MAGI/whisper_progress'
+SAMPLE_RATE = 16000  # Whisper expects 16kHz audio
 
 def update_progress(message, percentage):
     os.makedirs('/tmp/MAGI', exist_ok=True)
@@ -66,14 +67,29 @@ def transcribe():
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file provided'}), 400
     
-    audio_file = request.files['audio']
-    audio_data = np.frombuffer(audio_file.read(), dtype=np.float32)
-    
-    # Use input_features instead of inputs
-    result = pipe({"input_features": audio_data})
-    transcription = result['text']
-    
-    return jsonify({'transcription': transcription})
+    try:
+        audio_file = request.files['audio']
+        audio_data = np.frombuffer(audio_file.read(), dtype=np.float32)
+        
+        # Handle both input formats
+        if "input_features" in str(request.headers.get('Content-Type', '')):
+            # Direct feature input
+            inputs = {"input_features": audio_data}
+        else:
+            # Raw audio input
+            inputs = {
+                "raw": audio_data,
+                "sampling_rate": SAMPLE_RATE
+            }
+        
+        # Process the audio
+        result = pipe(inputs)
+        transcription = result['text'].strip()
+        
+        return jsonify({'transcription': transcription})
+    except Exception as e:
+        print(f"Transcription error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/status', methods=['GET'])
 def status():

@@ -339,6 +339,7 @@ class ModelManager(Gtk.ApplicationWindow):
                 """Monitor Whisper server startup using status endpoint"""
                 retry_count = 0
                 server_started = False
+                first_status_check = True
                 
                 while retry_count < 60:  # Up to 30 minutes
                     try:
@@ -359,23 +360,35 @@ class ModelManager(Gtk.ApplicationWindow):
                                     GLib.idle_add(self.set_whisper_status, "Running", 100, 
                                                 "Model loaded and ready")
                                     return
+                            elif status_data['percentage'] == -1:
+                                # Server reported an error
+                                if "Error:" in status_data.get('message', ''):
+                                    # Only show actual errors, not initialization messages
+                                    GLib.idle_add(self.set_whisper_status, "Starting", 
+                                                max(10, status_data['percentage']), 
+                                                "Initializing model...")
                             else:
-                                # Update status from server
+                                # Update status from server, but ensure progress doesn't go below 10
                                 GLib.idle_add(self.set_whisper_status, "Starting", 
-                                            status_data['percentage'], 
+                                            max(10, status_data['percentage']), 
                                             status_data['message'])
                         
                     except requests.exceptions.ConnectionError:
-                        if not server_started:
+                        if first_status_check:
+                            # On first check, just wait silently
+                            first_status_check = False
+                        elif not server_started:
                             GLib.idle_add(self.set_whisper_status, "Starting", 10, 
                                         "Waiting for server to start...")
                     except Exception as e:
-                        # Only print error if server was previously detected
-                        if server_started:
+                        # Only print error if server was previously detected and not first check
+                        if server_started and not first_status_check:
                             print(f"Whisper startup monitoring error: {e}")
+                        if first_status_check:
+                            first_status_check = False
                     
                     retry_count += 1
-                    time.sleep(3)  # Check more frequently during startup
+                    time.sleep(2)  # Check frequently during startup
                 
                 # Only show timeout error if we never detected the server starting
                 if not server_started:
