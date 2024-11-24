@@ -333,54 +333,52 @@ class ModelManager(Gtk.ApplicationWindow):
             script_path = str(SCRIPT_DIR / 'start_whisper_server.sh')
             self.whisper_server_process = subprocess.Popen([script_path])
             print(f"Started Whisper server with script: {script_path}")
-            self.set_whisper_status("Starting", 10, "Loading model from USB (this may take several minutes)...")
+            self.set_whisper_status("Starting", 10, "Starting server...")
             
-            # Start a thread to monitor for the server becoming available
             def monitor_whisper_startup():
-                """Monitor Whisper server startup without showing temporary errors"""
+                """Monitor Whisper server startup using status endpoint"""
                 retry_count = 0
-                loading_started = False
-                while retry_count < 60:  # Keep trying for up to 30 minutes
+                server_started = False
+                
+                while retry_count < 60:  # Up to 30 minutes
                     try:
-                        audio_data = np.zeros(8000, dtype=np.float32)
-                        files = {'audio': ('test.wav', audio_data.tobytes())}
-                        response = requests.post('http://localhost:5000/transcribe', 
-                                            files=files, timeout=30)
-                        if response.ok:
-                            GLib.idle_add(self.set_whisper_status, "Running", 100, "Model loaded and ready")
-                            return
-                    except requests.exceptions.ConnectionError:
-                        retry_count += 1
-                        # Only show loading message once we've detected the server
-                        if not loading_started:
-                            try:
-                                # Check if server is responding to status endpoint
-                                status_response = requests.get('http://localhost:5000/status', timeout=5)
-                                if status_response.ok:
-                                    loading_started = True
-                            except:
-                                pass
+                        # First check status endpoint
+                        status_response = requests.get('http://localhost:5000/status', timeout=5)
+                        if status_response.ok:
+                            server_started = True
+                            status_data = status_response.json()
+                            
+                            # Check if server is fully ready
+                            if status_data['percentage'] == 100:
+                                # Verify with a quick transcription test
+                                audio_data = np.zeros(8000, dtype=np.float32)
+                                files = {'audio': ('test.wav', audio_data.tobytes())}
+                                test_response = requests.post('http://localhost:5000/transcribe', 
+                                                        files=files, timeout=30)
+                                if test_response.ok:
+                                    GLib.idle_add(self.set_whisper_status, "Running", 100, 
+                                                "Model loaded and ready")
+                                    return
+                            else:
+                                # Update status from server
+                                GLib.idle_add(self.set_whisper_status, "Starting", 
+                                            status_data['percentage'], 
+                                            status_data['message'])
                         
-                        if loading_started:
-                            progress = min(80, 10 + (retry_count * 2))
-                            GLib.idle_add(self.set_whisper_status, "Starting", progress, 
-                                        "Loading model from USB (this may take several minutes)...")
-                        else:
+                    except requests.exceptions.ConnectionError:
+                        if not server_started:
                             GLib.idle_add(self.set_whisper_status, "Starting", 10, 
-                                        "Initializing server...")
-                    except requests.exceptions.Timeout:
-                        if loading_started:
-                            progress = min(80, 10 + (retry_count * 2))
-                            GLib.idle_add(self.set_whisper_status, "Starting", progress,
-                                        "Model still loading...")
+                                        "Waiting for server to start...")
                     except Exception as e:
-                        # Suppress other temporary errors during startup
-                        pass
+                        # Only print error if server was previously detected
+                        if server_started:
+                            print(f"Whisper startup monitoring error: {e}")
                     
-                    time.sleep(30)  # Check every 30 seconds
+                    retry_count += 1
+                    time.sleep(3)  # Check more frequently during startup
                 
                 # Only show timeout error if we never detected the server starting
-                if not loading_started:
+                if not server_started:
                     GLib.idle_add(self.set_whisper_status, "Error", 0, 
                                 "Server startup timeout - please check system resources")
             
@@ -390,6 +388,7 @@ class ModelManager(Gtk.ApplicationWindow):
         except Exception as e:
             print(f"Failed to start Whisper server: {e}")
             self.set_whisper_status("Error", 0, f"Failed to start: {e}")
+
     
     def check_ollama_service(self):
         """Check Ollama service status without trying to manage it"""
@@ -440,7 +439,7 @@ class ModelManager(Gtk.ApplicationWindow):
                     "Service startup timeout - please check system status")
     
     def load_ollama_model(self):
-        """Load Ollama model with improved error handling"""
+        """Load Ollama model with improved ready-state detection"""
         try:
             model_name = self.config.get('ollama_model', 'mistral')
             print(f"\nDEBUG: Starting Ollama model check for {model_name}")
@@ -449,68 +448,76 @@ class ModelManager(Gtk.ApplicationWindow):
             GLib.idle_add(self.set_ollama_status, "Loading", 70, 
                         "Loading model into VRAM (this may take several minutes)...")
             
-            test_request = {
-                'model': model_name,
-                'prompt': 'Hi',
-                'options': {
-                    'num_predict': 1,
-                    'temperature': 0
-                }
-            }
-            
-            # First try with shorter timeout to detect if server is responding
-            try:
-                response = requests.post(
-                    'http://localhost:11434/api/generate',
-                    json=test_request,
-                    timeout=60
-                )
-                if response.ok:
-                    GLib.idle_add(
-                        self.set_ollama_status,
-                        "Running",
-                        100,
-                        "Model loaded and ready"
-                    )
-                    return
-            except requests.exceptions.Timeout:
-                # If we timeout, the server is probably still loading the model
-                # Continue with monitoring instead of showing error
-                pass
-            except requests.exceptions.ConnectionError:
-                # Check if service is actually running
+            def verify_model_ready():
+                """Verify model is truly ready by running a quick inference"""
                 try:
-                    requests.get('http://localhost:11434/api/version', timeout=5)
-                    # If we get here, service is running but not ready
-                    pass
-                except requests.exceptions.ConnectionError:
-                    GLib.idle_add(
-                        self.set_ollama_status,
-                        "Error",
-                        0,
-                        "Ollama service not running - please start with: systemctl start ollama"
+                    # Use a simple test prompt
+                    response = requests.post(
+                        'http://localhost:11434/api/generate',
+                        json={
+                            'model': model_name,
+                            'prompt': 'Say "ready" if you can process this.',
+                            'options': {
+                                'num_predict': 10,
+                                'temperature': 0
+                            }
+                        },
+                        timeout=30  # Short timeout for ready check
                     )
-                    return
+                    return response.ok and len(response.text) > 0
+                except:
+                    return False
             
-            # Start monitoring loop with longer interval
+            # Start monitoring loop
             retry_count = 0
             while retry_count < 30:  # Try for up to 15 minutes
                 try:
+                    # First check if model is pulled/present
                     response = requests.post(
                         'http://localhost:11434/api/generate',
-                        json=test_request,
+                        json={
+                            'model': model_name,
+                            'prompt': 'Hi',
+                            'options': {
+                                'num_predict': 1,
+                                'temperature': 0
+                            }
+                        },
                         timeout=60
                     )
+                    
                     if response.ok:
+                        # Model responded, but let's verify it's truly ready
+                        for _ in range(3):  # Try verification up to 3 times
+                            if verify_model_ready():
+                                GLib.idle_add(
+                                    self.set_ollama_status,
+                                    "Running",
+                                    100,
+                                    "Model loaded and ready"
+                                )
+                                return
+                            time.sleep(5)  # Wait between verification attempts
+                        
+                        # If we get here, model responded but might not be fully ready
+                        retry_count += 1
+                        progress = min(95, 70 + (retry_count))
                         GLib.idle_add(
                             self.set_ollama_status,
-                            "Running",
-                            100,
-                            "Model loaded and ready"
+                            "Loading",
+                            progress,
+                            "Model completing initialization..."
                         )
-                        return
+                    else:
+                        retry_count += 1
+                        progress = min(90, 70 + (retry_count))
+                        GLib.idle_add(
+                            self.set_ollama_status,
+                            "Loading",
+                            progress,
+                            "Loading model into VRAM (this may take several minutes)..."
+                        )
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                    # During loading, just update progress
                     retry_count += 1
                     progress = min(90, 70 + (retry_count))
                     GLib.idle_add(
@@ -519,6 +526,8 @@ class ModelManager(Gtk.ApplicationWindow):
                         progress,
                         "Loading model into VRAM (this may take several minutes)..."
                     )
+                except Exception as e:
+                    print(f"DEBUG: Unexpected error during Ollama loading: {e}")
                 
                 time.sleep(30)  # Check every 30 seconds
             
@@ -531,7 +540,6 @@ class ModelManager(Gtk.ApplicationWindow):
             )
             
         except Exception as e:
-            # More user-friendly error messages
             if "Connection refused" in str(e):
                 msg = "Ollama service not running - please start with: systemctl start ollama"
             else:

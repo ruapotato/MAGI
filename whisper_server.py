@@ -6,6 +6,12 @@ import torch
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 import os
 import sys
+import warnings
+import logging
+
+# Configure logging to suppress specific warnings
+logging.getLogger("transformers").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 app = Flask(__name__)
 progress_file = '/tmp/MAGI/whisper_progress'
@@ -37,6 +43,7 @@ try:
     processor = AutoProcessor.from_pretrained(model_id)
 
     update_progress("Setting up pipeline...", 90)
+    # Update pipeline to use new parameter names and settings
     pipe = pipeline(
         "automatic-speech-recognition",
         model=model,
@@ -44,6 +51,7 @@ try:
         feature_extractor=processor.feature_extractor,
         torch_dtype=torch_dtype,
         device=device,
+        model_kwargs={"language": "en"}  # Force English output
     )
 
     update_progress("Ready", 100)
@@ -61,7 +69,8 @@ def transcribe():
     audio_file = request.files['audio']
     audio_data = np.frombuffer(audio_file.read(), dtype=np.float32)
     
-    result = pipe(audio_data)
+    # Use input_features instead of inputs
+    result = pipe({"input_features": audio_data})
     transcription = result['text']
     
     return jsonify({'transcription': transcription})
