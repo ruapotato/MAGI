@@ -543,14 +543,16 @@ class ModelManagerApplication(Adw.Application):
         win = ModelManager(self)
         win.present()
         
-        # Position at bottom of screen
+        # Position at top right of screen
         display = win.get_display()
         monitor = display.get_monitors()[0]
         geometry = monitor.get_geometry()
         
         win_width, win_height = win.get_default_size()
-        x = geometry.x + (geometry.width - win_width) // 2
-        y = geometry.y + geometry.height - win_height - 20
+        # Calculate x to align with right edge, leaving a small gap
+        x = geometry.x + geometry.width - win_width - 10
+        # Calculate y to align with top edge, leaving a small gap
+        y = geometry.y + 10
         
         def set_window_properties():
             try:
@@ -558,13 +560,23 @@ class ModelManagerApplication(Adw.Application):
                 output = subprocess.check_output(['xdotool', 'search', '--name', '^MAGI Model Status$']).decode().strip()
                 if output:
                     window_id = output.split('\n')[0]
-                    # Set window properties
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,below,sticky'], check=True)
+                    
+                    # Make window visible on all workspaces with -1
                     subprocess.run(['wmctrl', '-i', '-r', window_id, '-t', '-1'], check=True)
-                    # Move window
+                    
+                    # Set window to stay below others and make it sticky (appears on all workspaces)
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,below,sticky'], check=True)
+                    
+                    # Move window to top right
                     subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', f'0,{x},{y},-1,-1'], check=True)
+                    
+                    # Additional command to ensure it's on all workspaces
+                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,sticky'], check=True)
             except Exception as e:
                 print(f"Failed to set window properties: {e}")
+                # Retry after a short delay if it fails
+                GLib.timeout_add(500, set_window_properties)
+                return False
             return False
         
         # Give the window time to appear before setting properties
