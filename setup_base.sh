@@ -140,7 +140,7 @@ done
 # Copy MAGI files
 echo "Copying MAGI files..."
 cp ../magi_shell.py config/includes.chroot/opt/magi/
-cp ../server.py config/includes.chroot/opt/magi/
+cp ../whisper_server.py config/includes.chroot/opt/magi/
 cp ../llm_menu.py config/includes.chroot/opt/magi/
 cp ../settings.py config/includes.chroot/opt/magi/
 cp ../model_manager.py config/includes.chroot/opt/magi/
