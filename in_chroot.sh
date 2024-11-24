@@ -339,25 +339,6 @@ pkill -f ollama || true
 sleep 1
 pkill -9 -f ollama || true
 
-# Create MAGI service
-cat > /etc/systemd/system/magi-whisper.service << 'SERVICE'
-[Unit]
-Description=MAGI Whisper Speech Recognition Server
-After=network.target
-
-[Service]
-Type=simple
-User=root
-ExecStart=/opt/magi/start_whisper_server.sh
-WorkingDirectory=/opt/magi
-Restart=always
-RestartSec=3
-Environment="PYTHONPATH=/opt/magi/ears_pyenv/lib/python3.11/site-packages"
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
 # Create desktop entry
 cat > /usr/share/xsessions/magi.desktop << 'DESKTOP'
 [Desktop Entry]
