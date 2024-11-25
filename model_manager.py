@@ -252,53 +252,72 @@ class ModelManager(Gtk.ApplicationWindow):
             try:
                 GLib.idle_add(self.set_whisper_status, "Checking", 50, "Testing connection...")
                 
+                # First check status endpoint
                 try:
-                    audio_data = np.zeros(8000, dtype=np.float32)  # 0.5 seconds of silence
-                    files = {'audio': ('test.wav', audio_data.tobytes())}
-                    response = requests.post('http://localhost:5000/transcribe', 
-                                        files=files, timeout=60)
-                    if response.ok:
-                        GLib.idle_add(self.set_whisper_status, "Running", 100, "Model verified")
+                    status_response = requests.get('http://localhost:5000/status', timeout=5)
+                    if status_response.ok:
+                        # Then verify with transcription
+                        audio_data = np.zeros(8000, dtype=np.float32)
+                        files = {'audio': ('test.wav', audio_data.tobytes())}
+                        response = requests.post('http://localhost:5000/transcribe', 
+                                            files=files, timeout=10)
+                        if response.ok:
+                            GLib.idle_add(self.set_whisper_status, "Running", 100, "Model verified")
+                        else:
+                            GLib.idle_add(self.set_whisper_status, "Loading", 50, "Model initializing...")
                     else:
-                        GLib.idle_add(self.set_whisper_status, "Error", 0, "Server error")
+                        GLib.idle_add(self.set_whisper_status, "Error", 0, "Server not responding")
                 except requests.exceptions.ConnectionError:
                     GLib.idle_add(self.set_whisper_status, "Error", 0, "Server not running")
                 except requests.exceptions.Timeout:
-                    GLib.idle_add(self.set_whisper_status, "Error", 0, "Server timeout")
+                    GLib.idle_add(self.set_whisper_status, "Loading", 50, "Model initializing...")
                 
             except Exception as e:
                 print(f"Whisper verification error: {e}")
                 GLib.idle_add(self.set_whisper_status, "Error", 0, str(e))
             
-            # Check Ollama - simplified check that won't overwrite a working status
+            # Check Ollama with more thorough verification
             try:
-                if self.ollama_status != "Running":  # Only check if not already running
-                    print("DEBUG: Checking Ollama status...")
-                    response = requests.post(
-                        'http://localhost:11434/api/generate',
-                        json={
-                            'model': self.config.get('ollama_model', 'mistral'),
-                            'prompt': 'Hi',
-                            'options': {
-                                'num_predict': 1,
-                                'temperature': 0
-                            }
-                        },
-                        timeout=60  # Shorter timeout for verification
-                    )
-                    
-                    if response.ok:
+                print("DEBUG: Performing thorough Ollama check...")
+                def verify_ollama_ready():
+                    try:
+                        # Test with a more complex prompt to ensure model is loaded
+                        response = requests.post(
+                            'http://localhost:11434/api/generate',
+                            json={
+                                'model': self.config.get('ollama_model', 'mistral'),
+                                'prompt': 'Explain in 5 words: What is AI?',
+                                'options': {
+                                    'num_predict': 20
+                                }
+                            },
+                            timeout=30
+                        )
+                        return response.ok and len(response.text.strip()) > 0
+                    except:
+                        return False
+                
+                # Try verification multiple times
+                for attempt in range(3):
+                    if verify_ollama_ready():
                         GLib.idle_add(self.set_ollama_status, "Running", 100, "Model verified")
-                    else:
-                        GLib.idle_add(self.set_ollama_status, "Error", 0, 
-                                    f"Model test failed: {response.text}")
+                        break
+                    elif attempt < 2:  # Don't sleep on last attempt
+                        time.sleep(5)
                 else:
-                    print("DEBUG: Ollama already running, skipping check")
+                    # If we get here, verification failed
+                    GLib.idle_add(self.set_ollama_status, "Loading", 70, 
+                                "Loading model into VRAM (this may take several minutes)...")
+                    # Start the loading process again
+                    threading.Thread(target=self.load_ollama_model, daemon=True).start()
                     
             except Exception as e:
                 print(f"Ollama verification error: {e}")
-                if self.ollama_status != "Running":  # Don't overwrite working status
-                    GLib.idle_add(self.set_ollama_status, "Error", 0, str(e))
+                if "Connection refused" in str(e):
+                    msg = "Ollama service not running - please start with: systemctl start ollama"
+                else:
+                    msg = str(e)
+                GLib.idle_add(self.set_ollama_status, "Error", 0, msg)
             
             # Update last check time
             check_time = time.strftime("%H:%M:%S")
@@ -339,63 +358,55 @@ class ModelManager(Gtk.ApplicationWindow):
                 """Monitor Whisper server startup using status endpoint"""
                 retry_count = 0
                 server_started = False
-                first_status_check = True
                 
-                while retry_count < 60:  # Up to 30 minutes
+                while retry_count < 180:  # Increase timeout to 15 minutes (180 * 5 seconds)
                     try:
-                        # First check status endpoint
+                        # First try status endpoint
                         status_response = requests.get('http://localhost:5000/status', timeout=5)
                         if status_response.ok:
-                            server_started = True
                             status_data = status_response.json()
+                            server_started = True
                             
-                            # Check if server is fully ready
+                            # Check server status
                             if status_data['percentage'] == 100:
-                                # Verify with a quick transcription test
-                                audio_data = np.zeros(8000, dtype=np.float32)
-                                files = {'audio': ('test.wav', audio_data.tobytes())}
-                                test_response = requests.post('http://localhost:5000/transcribe', 
-                                                        files=files, timeout=30)
-                                if test_response.ok:
-                                    GLib.idle_add(self.set_whisper_status, "Running", 100, 
-                                                "Model loaded and ready")
-                                    return
-                            elif status_data['percentage'] == -1:
-                                # Server reported an error
-                                if "Error:" in status_data.get('message', ''):
-                                    # Only show actual errors, not initialization messages
+                                # Verify server is truly ready with transcription test
+                                try:
+                                    audio_data = np.zeros(8000, dtype=np.float32)
+                                    files = {'audio': ('test.wav', audio_data.tobytes())}
+                                    test_response = requests.post('http://localhost:5000/transcribe', 
+                                                            files=files, timeout=10)
+                                    if test_response.ok:
+                                        GLib.idle_add(self.set_whisper_status, "Running", 100, 
+                                                    "Model loaded and ready")
+                                        return
+                                except requests.exceptions.RequestException:
+                                    # If test fails but server is up, show correct loading state
                                     GLib.idle_add(self.set_whisper_status, "Starting", 
-                                                max(10, status_data['percentage']), 
-                                                "Initializing model...")
+                                                status_data['percentage'], 
+                                                status_data['message'])
                             else:
-                                # Update status from server, but ensure progress doesn't go below 10
+                                # Update with server's status
                                 GLib.idle_add(self.set_whisper_status, "Starting", 
-                                            max(10, status_data['percentage']), 
+                                            status_data['percentage'], 
                                             status_data['message'])
                         
                     except requests.exceptions.ConnectionError:
-                        if first_status_check:
-                            # On first check, just wait silently
-                            first_status_check = False
-                        elif not server_started:
+                        # Only update status if we haven't detected server yet
+                        if not server_started:
                             GLib.idle_add(self.set_whisper_status, "Starting", 10, 
                                         "Waiting for server to start...")
                     except Exception as e:
-                        # Only print error if server was previously detected and not first check
-                        if server_started and not first_status_check:
-                            print(f"Whisper startup monitoring error: {e}")
-                        if first_status_check:
-                            first_status_check = False
+                        print(f"Whisper startup monitoring error: {e}")
                     
                     retry_count += 1
-                    time.sleep(2)  # Check frequently during startup
+                    time.sleep(5)  # Check every 5 seconds
                 
-                # Only show timeout error if we never detected the server starting
+                # Only show timeout if server never started
                 if not server_started:
                     GLib.idle_add(self.set_whisper_status, "Error", 0, 
                                 "Server startup timeout - please check system resources")
-            
-            # Start the monitoring thread
+                
+            # Start monitoring thread
             threading.Thread(target=monitor_whisper_startup, daemon=True).start()
             
         except Exception as e:
