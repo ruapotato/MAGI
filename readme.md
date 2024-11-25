@@ -16,7 +16,7 @@ MAGI OS is an experimental Linux distribution that deeply integrates AI capabili
 ## System Requirements
 - CPU: x86_64 processor
 - RAM: 16GB minimum (32GB recommended)
-- GPU: NVIDIA GTX 1060 or better
+- GPU: NVIDIA GTX 1080 or better
 - VRAM: 8GB minimum (24GB recommended)
 - Storage: 30GB minimum
 
