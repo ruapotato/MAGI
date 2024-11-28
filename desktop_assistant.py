@@ -11,6 +11,7 @@ import os
 import requests
 import logging
 import subprocess
+import signal
 from pathlib import Path
 from typing import Optional
 
@@ -19,7 +20,6 @@ class TerminalWindow(Adw.ApplicationWindow):
         super().__init__(application=app)
         self.assistant = assistant
         
-        # Setup window
         self.set_title("MAGI Terminal")
         self.set_default_size(800, 600)
         
@@ -27,17 +27,20 @@ class TerminalWindow(Adw.ApplicationWindow):
         style_manager = Adw.StyleManager.get_default()
         style_manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
         
-        # Create layout
         self.setup_ui()
-        
-        # Start bash session
         self.spawn_terminal()
+        
+        self.paused = False
+        self.dummy_process = None
 
     def setup_ui(self):
-        """Setup the terminal interface"""
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         
+        # Header bar with pause button
         header = Adw.HeaderBar()
+        self.pause_button = Gtk.Button(label="Pause", css_classes=["suggested-action"])
+        self.pause_button.connect("clicked", self.on_pause_clicked)
+        header.pack_start(self.pause_button)
         main_box.append(header)
         
         self.terminal = Vte.Terminal()
@@ -45,8 +48,6 @@ class TerminalWindow(Adw.ApplicationWindow):
         self.terminal.set_font(Pango.FontDescription("Monospace 11"))
         self.terminal.set_scrollback_lines(10000)
         self.terminal.set_mouse_autohide(True)
-        
-        # Handle terminal output
         self.terminal.connect('contents-changed', self.on_terminal_output)
         
         scroll = Gtk.ScrolledWindow()
@@ -57,7 +58,6 @@ class TerminalWindow(Adw.ApplicationWindow):
         self.set_content(main_box)
 
     def spawn_terminal(self):
-        """Start a new bash session"""
         self.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
             os.environ['HOME'],
@@ -72,25 +72,75 @@ class TerminalWindow(Adw.ApplicationWindow):
         )
 
     def write_comment(self, text: str):
-        """Write a comment to terminal without extra spacing"""
         self.terminal.feed_child(f"# {text}\n".encode())
 
     def send_command(self, command: str):
-        """Send command to terminal without extra spacing"""
         self.terminal.feed_child(f"{command}\n".encode())
 
     def get_terminal_content(self) -> str:
-        """Get current terminal content"""
         return self.terminal.get_text()[0].strip()
 
     def on_terminal_output(self, terminal):
-        """Handle terminal output changes"""
         content = self.get_terminal_content()
         self.assistant.last_terminal_content = content
 
+    def spawn_dummy_process(self):
+        try:
+            # Create a script that just sleeps
+            script = """#!/bin/bash
+exec -a dummy_espeak sleep infinity
+"""
+            script_path = "/tmp/dummy_espeak.sh"
+            with open(script_path, 'w') as f:
+                f.write(script)
+            os.chmod(script_path, 0o755)
+            
+            # Launch with the custom process name
+            self.dummy_process = subprocess.Popen(
+                [script_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                preexec_fn=os.setsid
+            )
+            
+            return True
+        except Exception as e:
+            self.write_comment(f"Error creating dummy process: {str(e)}")
+            return False
+
+    def kill_dummy_process(self):
+        if self.dummy_process:
+            try:
+                os.killpg(os.getpgid(self.dummy_process.pid), signal.SIGTERM)
+                self.dummy_process.wait(timeout=1)
+                self.dummy_process = None
+                return True
+            except Exception as e:
+                self.write_comment(f"Error killing dummy process: {str(e)}")
+                return False
+        return True
+
+    def on_pause_clicked(self, button):
+        if not self.paused:
+            if self.spawn_dummy_process():
+                self.paused = True
+                button.set_label("Resume")
+                button.remove_css_class("suggested-action")
+                button.add_css_class("destructive-action")
+                self.write_comment("Transcription paused")
+        else:
+            if self.kill_dummy_process():
+                self.paused = False
+                button.set_label("Pause")
+                button.remove_css_class("destructive-action")
+                button.add_css_class("suggested-action")
+                self.write_comment("Transcription resumed")
+
+    def cleanup(self):
+        self.kill_dummy_process()
+
 class DesktopAssistant:
     def __init__(self, model_name: str = "mistral", debug: bool = False):
-        # Configure logging
         level = logging.DEBUG if debug else logging.INFO
         logging.basicConfig(
             level=level,
@@ -99,17 +149,14 @@ class DesktopAssistant:
         )
         self.log = logging.getLogger('desktop_assistant')
         
-        # Initialize GTK app
         self.app = Adw.Application(application_id='com.system.magi.desktop')
         self.app.connect('activate', self.on_activate)
         
-        # Setup state
         self.last_terminal_content = ""
         self.command_history = []
         self.window = None
         self.user_name = None
         
-        # Setup AI components
         self.system_prompt = """You are a desktop command assistant that outputs ONLY a single bash command.
 
 Rules:
@@ -122,7 +169,6 @@ Rules:
    - Track user's name if provided ("My name is...")
    - Maintain conversation context
    - Use espeak for all conversational responses
-   - Don't try to access non-existent files or paths
    
 3. Command Usage:
    - File operations: ls, pwd, cat (only for existing files)
@@ -147,17 +193,20 @@ Assistant: espeak "Nice to meet you Bob! How can I assist you?"
 User: "Tell me a joke"
 Assistant: espeak "Why did the programmer quit his job? He didn't get arrays!"
 
-User: "What's in this folder?"
-Assistant: ls -la
-
 Remember: Always use espeak for conversations, jokes, and direct responses!"""
 
+        # Register cleanup
+        import atexit
+        atexit.register(self.cleanup)
+
+    def cleanup(self):
+        if self.window:
+            self.window.cleanup()
+
     def on_activate(self, app):
-        """Create and show the terminal window"""
         self.window = TerminalWindow(self, app)
         self.window.present()
         
-        # Start processing stdin
         GLib.io_add_watch(
             sys.stdin.fileno(),
             GLib.IO_IN | GLib.IO_HUP,
@@ -165,13 +214,10 @@ Remember: Always use espeak for conversations, jokes, and direct responses!"""
         )
 
     def get_ai_response(self, user_input: str) -> str:
-        """Get command from Ollama"""
         try:
-            # Check for name introduction
             if "my name is" in user_input.lower():
                 self.user_name = user_input.lower().split("my name is")[-1].strip()
             
-            # Add recent history and user info
             history_context = "\n".join(
                 f"Previous command: {cmd}" 
                 for cmd in self.command_history[-3:]
@@ -193,8 +239,7 @@ Remember: Always use espeak for conversations, jokes, and direct responses!"""
             
             if response.status_code == 200:
                 command = response.json()['response'].strip()
-                command = command.split('\n')[0].strip()
-                return command
+                return command.split('\n')[0].strip()
                 
             return f"espeak 'API error: {response.status_code}'"
             
@@ -203,7 +248,6 @@ Remember: Always use espeak for conversations, jokes, and direct responses!"""
             return f"espeak 'Error getting AI response: {str(e)}'"
 
     def on_stdin_ready(self, source, condition):
-        """Handle stdin input"""
         if condition & GLib.IO_HUP:
             return False
             
@@ -213,18 +257,14 @@ Remember: Always use espeak for conversations, jokes, and direct responses!"""
             
         user_input = line.strip()
         if user_input:
-            # Show user input as comment
             if self.window:
                 self.window.write_comment(user_input)
             
-            # Get and execute AI command
             command = self.get_ai_response(user_input)
             if command:
-                # Execute command
                 if self.window:
                     self.window.send_command(command)
                 
-                # Update history
                 self.command_history.append(command)
                 if len(self.command_history) > 10:
                     self.command_history.pop(0)
@@ -232,7 +272,6 @@ Remember: Always use espeak for conversations, jokes, and direct responses!"""
         return True
 
     def run(self):
-        """Start the application"""
         return self.app.run(sys.argv)
 
 def main():
