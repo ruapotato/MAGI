@@ -758,14 +758,54 @@ class MAGIPanel(Gtk.ApplicationWindow):
         tts_button.connect('clicked', self._speak_selection)
         
         voice_button = VoiceInputButton()
+
+        # Add new assistant button
+        assistant_button = Gtk.Button()
+        assistant_button.set_child(Gtk.Image.new_from_icon_name("terminal-symbolic"))
+        assistant_button.connect('clicked', self._launch_voice_assistant)
         
         button_box.append(settings_button)
         button_box.append(llm_button)
         button_box.append(tts_button)
         button_box.append(voice_button)
+        button_box.append(assistant_button)
         
         box.append(button_box)
         self.box.append(box)
+   
+   
+    def _launch_voice_assistant(self, button):
+        """Launch the voice assistant pipeline directly"""
+        try:
+            # Get the magi_shell directory path
+            magi_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # Start ASR process
+            asr_path = os.path.join(magi_dir, 'asr.py')
+            asr_process = subprocess.Popen(
+                [sys.executable, asr_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Start desktop assistant process
+            assistant_path = os.path.join(magi_dir, 'desktop_assistant.py')
+            assistant_process = subprocess.Popen(
+                [sys.executable, assistant_path],
+                stdin=asr_process.stdout,
+                stderr=subprocess.PIPE
+            )
+            
+            # Close ASR stdout in parent process
+            asr_process.stdout.close()
+            
+            # Store process references for cleanup
+            if not hasattr(self, '_assistant_processes'):
+                self._assistant_processes = []
+            self._assistant_processes.append((asr_process, assistant_process))
+            
+        except Exception as e:
+            print(f"Error launching voice assistant: {e}")
    
     
     def _speak_selection(self, button):
