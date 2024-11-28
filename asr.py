@@ -13,8 +13,20 @@ import requests
 import json
 import argparse
 import signal
+import subprocess
+import psutil
 from contextlib import contextmanager
 import logging
+
+def is_espeak_running():
+    """Check if espeak is currently running"""
+    for proc in psutil.process_iter(['name', 'cmdline']):
+        try:
+            if proc.info['name'] == 'espeak' or (proc.info['cmdline'] and 'espeak' in proc.info['cmdline'][0]):
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return False
 
 class VoiceProcessor:
     def __init__(self, debug=False):
@@ -37,6 +49,7 @@ class VoiceProcessor:
         self.SILENCE_LIMIT = 0.7
         self.PREV_AUDIO = 0.5
         self.MIN_SILENCE_DETECTIONS = 3
+        self.MIN_AUDIO_DURATION = 0.35
         
         # Thresholds
         self.BASE_ENERGY_THRESHOLD = 0.005
@@ -76,6 +89,33 @@ class VoiceProcessor:
             "processing": "⚙️ ",
             "error": "❌"
         }
+        
+        # Add hallucination filtering
+        self.assume_hallucination = [
+            "Thank you.",
+            ".",
+            "You.",
+            "Thanks for watching.",
+            "Thanks for listening.",
+            "Subscribe.",
+            "Like and subscribe.",
+            "Please subscribe.",
+            "Thank you for watching.",
+            "ご視聴ありがとうございました",
+            "お願いします",
+            "ありがとうございます",
+            "字幕は自動生成されています"
+        ]
+        
+        # Add regex for Japanese/Chinese character detection
+        self.cjk_ranges = [
+            (0x4E00, 0x9FFF),   # CJK Unified Ideographs
+            (0x3040, 0x309F),   # Hiragana
+            (0x30A0, 0x30FF),   # Katakana
+            (0xFF65, 0xFF9F),   # Halfwidth Katakana
+            (0x3000, 0x303F),   # CJK Symbols and Punctuation
+            (0xFF00, 0xFFEF),   # Fullwidth Forms
+        ]
 
     def load_config(self):
         config_path = os.path.expanduser("~/.config/magi/config.json")
@@ -171,6 +211,31 @@ class VoiceProcessor:
             self.log.error(f"Transcription error: {e}")
             return None
 
+    def contains_cjk(self, text):
+        """Check if text contains CJK characters"""
+        for char in text:
+            code = ord(char)
+            if any(start <= code <= end for start, end in self.cjk_ranges):
+                return True
+        return False
+
+    def is_likely_hallucination(self, text):
+        """Check if transcription is likely a hallucination"""
+        if not text:
+            return True
+            
+        # Check against known hallucinations
+        if text.strip() in self.assume_hallucination:
+            self.log.debug(f"Filtered known hallucination: {text}")
+            return True
+            
+        # Check for CJK characters when not expected
+        if self.contains_cjk(text):
+            self.log.debug(f"Filtered text with CJK characters: {text}")
+            return True
+            
+        return False
+
     def process_audio(self):
         if not self.frames:
             return
@@ -181,10 +246,29 @@ class VoiceProcessor:
         all_frames = list(self.prev_frames) + self.frames
         audio_data = np.concatenate([np.frombuffer(frame, dtype=np.float32) for frame in all_frames])
         
+        # Calculate duration in seconds
+        duration = len(audio_data) / self.RATE
+        
+        # Check if audio is too short
+        if duration < self.MIN_AUDIO_DURATION:
+            self.log.debug(f"Audio too short ({duration:.2f}s), skipping processing")
+            # Reset state without processing
+            self.frames = []
+            self.prev_frames.clear()
+            self.speech_history.clear()
+            self.speech_history.extend([False] * self.SPEECH_MEMORY)
+            self.silent_frames = 0
+            self.voiced_frames = 0
+            self.consecutive_silence = 0
+            self.update_status("waiting")
+            return
+        
         # Get transcription
         transcription = self.transcribe_audio(audio_data)
-        if transcription:
+        if transcription and not self.is_likely_hallucination(transcription):
             print(transcription, flush=True)
+        else:
+            self.log.debug("Transcription filtered or empty")
         
         # Reset state
         self.frames = []
@@ -206,6 +290,16 @@ class VoiceProcessor:
     def audio_callback(self, in_data, frame_count, time_info, status):
         if not self.running:
             return (None, pyaudio.paComplete)
+        
+        # Check for espeak before processing audio
+        if is_espeak_running():
+            # Skip processing while espeak is running
+            if self.status != "waiting":
+                self.log.debug("Espeak detected, pausing audio processing")
+                self.update_status("waiting")
+                self.frames = []
+                self.prev_frames.clear()
+            return (in_data, pyaudio.paContinue)
             
         audio_data = np.frombuffer(in_data, dtype=np.float32)
         energy, zcr = self._calculate_features(audio_data)
@@ -213,6 +307,9 @@ class VoiceProcessor:
         
         if is_speech:
             if self.status == "waiting":
+                # Double check espeak isn't starting up
+                if is_espeak_running():
+                    return (in_data, pyaudio.paContinue)
                 self.update_status("listening")
                 self.frames.extend(list(self.prev_frames))
             self.frames.append(in_data)
@@ -240,6 +337,12 @@ class VoiceProcessor:
         signal.signal(signal.SIGINT, lambda s, f: self.cleanup())
         
         try:
+            # Check for espeak before starting
+            if is_espeak_running():
+                self.log.warning("Waiting for espeak to finish...")
+                while is_espeak_running():
+                    time.sleep(0.1)
+            
             self.log.info("Starting audio capture...")
             self.update_status("waiting")
             
