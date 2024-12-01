@@ -69,7 +69,13 @@ apt-get install -y \
     python3-gi-cairo \
     gir1.2-gtk-4.0 \
     libadwaita-1-0 \
-    gir1.2-adw-1
+    gir1.2-adw-1 \
+    gir1.2-vte-2.91 \
+    gir1.2-vte-3.91 \
+    python3-pyaudio \
+    python3-scipy
+    
+    
 
 # Install system-wide pip packages needed for core functionality
 pip3 install --break-system-packages \
