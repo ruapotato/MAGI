@@ -146,6 +146,8 @@ cp ../settings.py config/includes.chroot/opt/magi/
 cp ../model_manager.py config/includes.chroot/opt/magi/
 cp ../ThemeManager.py config/includes.chroot/opt/magi/
 cp ../start.sh config/includes.chroot/opt/magi/
+cp ../desktop_assistant.py config/includes.chroot/opt/magi/
+cp ../asr.py config/includes.chroot/opt/magi/
 
 # Ensure all files are executable
 chmod +x config/includes.chroot/opt/magi/*.py

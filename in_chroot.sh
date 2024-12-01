@@ -75,7 +75,8 @@ apt-get install -y \
 pip3 install --break-system-packages \
     sounddevice \
     pynvml \
-    psutil
+    psutil \
+    
 
 # Create required MAGI directories
 mkdir -p /tmp/MAGI
