@@ -117,7 +117,7 @@ class MysticMind:
                     if 'response' in chunk:
                         prophecy += chunk['response']
             
-            return prophecy.strip()[:80]  # Keep it tweet-sized
+            return prophecy.strip()
             
         except Exception as e:
             return f"Oracle machine broke: {e}"
