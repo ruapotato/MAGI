@@ -51,7 +51,6 @@ apt-get install -y \
     dbus-x11 \
     at-spi2-core \
     xdotool \
-    espeak \
     feh \
     xcompmgr \
     rofi \
@@ -73,7 +72,9 @@ apt-get install -y \
     gir1.2-vte-2.91 \
     gir1.2-vte-3.91 \
     python3-pyaudio \
-    python3-scipy
+    python3-scipy \
+    libsndfile1 \
+    ffmpeg
     
     
 
@@ -82,8 +83,98 @@ pip3 install --break-system-packages \
     sounddevice \
     pynvml \
     psutil \
+    TTS\
+    torch\
+    sounddevice\
+    soundfile\
+    watchdog\
+    prctl
     
 
+# 🎭 The Grand Voice Model Summoning Ceremony 🎭
+cat > /opt/magi/summon_the_voice.py << 'DRAMATIC_FINALE'
+#!/usr/bin/env python3
+from dataclasses import dataclass
+from pathlib import Path
+import sys
+from typing import Optional, Tuple, Literal
+import torch
+from TTS.api import TTS
+
+VocalPerformers = Literal[
+    "p226",  # The Mysterious Baritone
+    "p326",  # The Dramatic Bass
+    "p330",  # The Smooth Operator
+    "p347"   # The Gentle Giant
+]
+
+@dataclass
+class TheatricalVoiceSummoner:
+    backstage_preparation: Optional[TTS] = None
+    green_room: Path = Path('/opt/magi/voice_models')
+    chosen_performer: str = "tts_models/en/vctk/vits"
+    
+    def prepare_for_opening_night(self) -> Tuple[bool, str]:
+        """🎭 The stage is set, the curtains drawn..."""
+        try:
+            # Preparing the stage
+            self.green_room.mkdir(parents=True, exist_ok=True)
+            
+            # Summoning our star performer
+            print("🎭 Casting the leading role...")
+            self.backstage_preparation = TTS(
+                model_name=self.chosen_performer,
+                progress_bar=False
+            ).to("cuda" if torch.cuda.is_available() else "cpu")
+            
+            # The grand rehearsal
+            print("📜 Memorizing the script...")
+            self.backstage_preparation.save_pretrained(
+                self.green_room,
+                model_name="magi_voice"
+            )
+            
+            return True, "Standing ovation! The voice model has taken the stage! 🎊"
+            
+        except Exception as stage_fright:
+            return False, f"Performance anxiety struck: {stage_fright} 😱"
+
+def orchestrate_the_performance() -> int:
+    """🎬 Ladies and gentlemen, the show is about to begin!"""
+    print("🎭 Welcome to tonight's performance of The Voice Model! 🎭")
+    
+    director = TheatricalVoiceSummoner()
+    show_must_go_on, critics_review = director.prepare_for_opening_night()
+    
+    print(critics_review)
+    return 0 if show_must_go_on else 1
+
+if __name__ == "__main__":
+    sys.exit(orchestrate_the_performance())
+DRAMATIC_FINALE
+
+# 🎬 And now, for our feature presentation...
+chmod +x /opt/magi/summon_the_voice.py
+
+echo "🎭 Raising the curtain on our voice model performance..."
+python3 /opt/magi/summon_the_voice.py
+
+# Ensuring the stage crew has proper access
+echo "🎟️ Distributing backstage passes..."
+chown -R magi:magi /opt/magi/voice_models
+chmod -R 755 /opt/magi/voice_models
+
+# Taking a bow
+echo "🎭 The voice model installation has concluded! *bows gracefully* 🎭"
+# The Great Espeak Masquerade
+if ln -s /opt/magi/magi_espeak.py /usr/bin/espeak; then
+    echo "🎭 Behold! Our python script is now masterfully disguised as espeak!"
+else
+    echo "😱 Alas! Our cunning plan of impersonation has been foiled!"
+    exit 1
+fi
+    
+    
 # Create required MAGI directories
 mkdir -p /tmp/MAGI
 touch /tmp/MAGI/current_context.txt

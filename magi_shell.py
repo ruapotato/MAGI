@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""The MAGI Shell: Where Pixels Meet Philosophy"""
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -19,24 +20,24 @@ from collections import deque
 from weakref import WeakKeyDictionary
 from ThemeManager import ThemeManager
 
-# Enable GPU acceleration but with optimized settings
+# Tell GTK to embrace the power of silicon
 os.environ['GTK_CSD'] = '0'
 os.environ['GDK_SCALE'] = '1'
 
-# Performance tuning constants
-UPDATE_INTERVAL = 1000      # Base interval for updates
-BATCH_SIZE = 10            # Number of updates to batch
-WIDGET_POOL_SIZE = 20      # Size of widget pools
-CACHE_TIMEOUT = 5000       # Cache timeout in ms
+# The sacred numbers of optimization
+UPDATE_INTERVAL = 1000      # Time between cosmic updates
+BATCH_SIZE = 10            # Size of our magical batches
+WIDGET_POOL_SIZE = 20      # Maximum widgets in the ethereal pool
+CACHE_TIMEOUT = 5000       # How long memories persist
 
 def load_config():
-    """Load configuration from JSON file"""
+    """Summon the sacred configuration from the depths of ~/.config"""
     config_path = os.path.expanduser("~/.config/magi/config.json")
     try:
-        with open(config_path) as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Warning: Could not load config ({e}), using defaults")
+        with open(config_path) as scroll_of_settings:
+            return json.load(scroll_of_settings)
+    except Exception as mystical_mishap:
+        print(f"Warning: The configuration scroll resists us ({mystical_mishap}), falling back to ancient defaults")
         default_config = {
             "panel_height": 28,
             "workspace_count": 4,
@@ -52,14 +53,14 @@ def load_config():
         }
         try:
             os.makedirs(os.path.dirname(config_path), exist_ok=True)
-            with open(config_path, 'w') as f:
-                json.dump(default_config, f, indent=4)
-        except Exception as e:
-            print(f"Warning: Could not save config: {e}")
+            with open(config_path, 'w') as new_scroll:
+                json.dump(default_config, new_scroll, indent=4)
+        except Exception as scroll_creation_mishap:
+            print(f"Warning: Could not inscribe new configuration scroll: {scroll_creation_mishap}")
         return default_config
 
 class UpdateManager:
-    """Centralized update manager to coordinate all panel updates"""
+    """The grand conductor of the update orchestra"""
     def __init__(self):
         self._updates = {}
         self._pending = set()
@@ -67,7 +68,7 @@ class UpdateManager:
         self._batch_id = None
         
     def schedule(self, name, callback, interval, priority=GLib.PRIORITY_DEFAULT):
-        """Schedule an update with batching and throttling"""
+        """Schedule an update in the cosmic dance of the interface"""
         current_time = time.monotonic() * 1000
         last_time = self._last_update.get(name, 0)
         
@@ -84,7 +85,7 @@ class UpdateManager:
             )
     
     def _process_updates(self):
-        """Process pending updates in batches"""
+        """Process the gathered updates in a harmonious batch"""
         current_time = time.monotonic() * 1000
         processed = set()
         
@@ -98,30 +99,30 @@ class UpdateManager:
                         callback()
                         self._last_update[name] = current_time
                         processed.add(name)
-                    except Exception as e:
-                        print(f"Update error ({name}): {e}")
+                    except Exception as update_mishap:
+                        print(f"The update ritual failed ({name}): {update_mishap}")
         
         self._pending -= processed
         self._batch_id = None
         return False
 
 class WidgetPool:
-    """Object pool for GTK widgets"""
+    """A mystical pool where widgets rest between incarnations"""
     def __init__(self, widget_class, size=WIDGET_POOL_SIZE):
         self._class = widget_class
         self._pool = deque(maxlen=size)
         self._active = WeakKeyDictionary()
         
-        # Pre-create widgets
+        # Pre-summon the widget spirits
         for _ in range(size):
             self._pool.append(self._create_widget())
     
     def _create_widget(self):
-        """Create a new widget instance"""
+        """Breathe life into a new widget"""
         return self._class()
     
     def acquire(self):
-        """Get a widget from the pool"""
+        """Summon a widget from the pool"""
         if self._pool:
             widget = self._pool.pop()
         else:
@@ -130,21 +131,21 @@ class WidgetPool:
         return widget
     
     def release(self, widget):
-        """Return a widget to the pool"""
+        """Return a widget to its slumber"""
         if widget in self._active:
             del self._active[widget]
             if len(self._pool) < self._pool.maxlen:
                 self._pool.append(widget)
 
 class Cache:
-    """Simple cache with timeout"""
+    """The temporary memory palace of our digital dreams"""
     def __init__(self, timeout=CACHE_TIMEOUT):
         self._cache = {}
         self._timestamps = {}
         self._timeout = timeout
     
     def get(self, key):
-        """Get cached value if not expired"""
+        """Recall a memory if it hasn't faded"""
         if key in self._cache:
             timestamp = self._timestamps[key]
             if time.monotonic() * 1000 - timestamp < self._timeout:
@@ -154,12 +155,63 @@ class Cache:
         return None
     
     def set(self, key, value):
-        """Cache a value"""
+        """Inscribe a new memory"""
         self._cache[key] = value
         self._timestamps[key] = time.monotonic() * 1000
 
+class WhisperingEarButton(Gtk.Button):
+    """The mystical ear that channels voices from the ether"""
+    def __init__(self):
+        super().__init__()
+        self._ethereal_portal = None
+        
+        # The all-seeing ear icon
+        self.set_child(Gtk.Image.new_from_icon_name("audio-card-symbolic"))
+        self.add_css_class('whispering-ear-button')
+        
+        # When clicked, open the portal to wisdom
+        self.connect('clicked', self._summon_listening_portal)
+    
+    def _summon_listening_portal(self, _):
+        """Open a terminal window to the realm of voice understanding"""
+        if self._ethereal_portal:
+            return
+            
+        try:
+            # Find the path to our mystical scrolls
+            sacred_scroll_path = os.path.dirname(os.path.abspath(__file__))
+            
+            # Prepare the incantation
+            listening_spell = (
+                f"cd {sacred_scroll_path} && "
+                f"./asr.py | ./voice_assistant.py"
+            )
+            
+            # Open the portal
+            self._ethereal_portal = subprocess.Popen(
+                ['mate-terminal', '--title=MAGI Voice Assistant', 
+                 '--command', f'bash -c "{listening_spell}"'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            
+            # Monitor the portal's status
+            def portal_watcher():
+                if self._ethereal_portal:
+                    self._ethereal_portal.wait()
+                    self._ethereal_portal = None
+                return False
+            
+            GLib.timeout_add(1000, portal_watcher)
+            
+        except Exception as mystical_mishap:
+            print(f"Failed to open the listening portal: {mystical_mishap}")
+            if self._ethereal_portal:
+                self._ethereal_portal.terminate()
+                self._ethereal_portal = None
+
 class WorkspaceSwitcher(Gtk.Box):
-    """Optimized workspace switcher"""
+    """The master of workspace dimensions"""
     def __init__(self, update_manager):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
         
@@ -172,12 +224,12 @@ class WorkspaceSwitcher(Gtk.Box):
         
     def _setup_workspace_buttons(self):
         config = load_config()
-        for i in range(config['workspace_count']):
-            button = self._button_pool.acquire()
-            button.set_label(str(i + 1))
-            button.connect('clicked', self._switch_workspace, i)
-            self.append(button)
-            self._active_buttons[i] = button
+        for realm_number in range(config['workspace_count']):
+            portal_button = self._button_pool.acquire()
+            portal_button.set_label(str(realm_number + 1))
+            portal_button.connect('clicked', self._switch_workspace, realm_number)
+            self.append(portal_button)
+            self._active_buttons[realm_number] = portal_button
         
         self._update_manager.schedule(
             'workspaces',
@@ -186,55 +238,53 @@ class WorkspaceSwitcher(Gtk.Box):
         )
     
     def _switch_workspace(self, button, workspace_num):
-        """Switch workspace with proper window manager interaction"""
+        """Transport the user to another dimension"""
         try:
-            # Get current workspace first
+            # Find current dimension
             output = subprocess.check_output(['wmctrl', '-d']).decode()
-            current = None
+            current_realm = None
             for line in output.splitlines():
                 if '*' in line:
-                    current = int(line.split()[0])
+                    current_realm = int(line.split()[0])
                     break
             
-            if current != workspace_num:
-                # Use both wmctrl and xdotool for better compatibility
+            if current_realm != workspace_num:
+                # Engage the dimensional transport
                 subprocess.run(['wmctrl', '-s', str(workspace_num)], check=True)
                 subprocess.run(['xdotool', 'set_desktop', str(workspace_num)], check=True)
                 
-                # Force window manager update
+                # Ensure reality stabilizes
                 GLib.timeout_add(100, self._update_current_workspace)
-        except Exception as e:
-            print(f"Workspace switch error: {e}")
+        except Exception as dimensional_rift:
+            print(f"Workspace transport malfunction: {dimensional_rift}")
     
     def _update_current_workspace(self):
-        """Update workspace state efficiently"""
+        """Update our knowledge of the current dimension"""
         try:
-            # Check cache first
-            current = self._cache.get('current_workspace')
-            if current is not None:
+            current_realm = self._cache.get('current_workspace')
+            if current_realm is not None:
                 return
             
             output = subprocess.check_output(['wmctrl', '-d']).decode()
             for line in output.splitlines():
                 if '*' in line:
                     workspace = int(line.split()[0])
-                    if workspace != current:
+                    if workspace != current_realm:
                         self._cache.set('current_workspace', workspace)
                         self._update_buttons(workspace)
                     break
-        except Exception as e:
-            print(f"Workspace update error: {e}")
+        except Exception as reality_glitch:
+            print(f"Workspace reality check failed: {reality_glitch}")
     
-    def _update_buttons(self, current):
-        """Update button states efficiently"""
-        for i, button in self._active_buttons.items():
-            if i == current:
+    def _update_buttons(self, current_realm):
+        """Update the appearance of dimensional portals"""
+        for realm_num, button in self._active_buttons.items():
+            if realm_num == current_realm:
                 button.add_css_class('active-workspace')
             else:
                 button.remove_css_class('active-workspace')
-
 class WindowList(Gtk.Box):
-    """Optimized window list"""
+    """The grand curator of window souls"""
     def __init__(self, update_manager):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
         self.set_hexpand(True)
@@ -244,120 +294,144 @@ class WindowList(Gtk.Box):
         self._window_buttons = {}
         self._cache = Cache()
         
-        # Start immediate update
+        # Begin the eternal window watch
         self._update_window_list()
-        # Schedule regular updates
         GLib.timeout_add(1000, self._update_window_list)
     
     def _update_window_list(self):
-        """Update window list with batching and caching"""
+        """Keep track of all windows in our reality"""
         try:
-            # Get window list
-            output = subprocess.check_output(['wmctrl', '-l']).decode()
-            current_windows = set()
+            window_census = subprocess.check_output(['wmctrl', '-l']).decode()
+            surviving_windows = set()
             
-            for line in output.splitlines():
-                parts = line.split(None, 3)
-                if len(parts) >= 4:
-                    window_id = parts[0]
-                    workspace = int(parts[1])
-                    title = parts[3]
+            for window_scroll in window_census.splitlines():
+                window_parts = window_scroll.split(None, 3)
+                if len(window_parts) >= 4:
+                    window_id = window_parts[0]
+                    window_realm = int(window_parts[1])
+                    window_title = window_parts[3]
                     
-                    # Skip panels and other system windows
-                    if "MAGI" in title or "Desktop" in title:
+                    # Ignore our own reflections
+                    if "MAGI" in window_title or "Desktop" in window_title:
                         continue
                         
-                    current_windows.add(window_id)
+                    surviving_windows.add(window_id)
                     if window_id not in self._window_buttons:
-                        button = self._button_pool.acquire()
-                        button.set_label(title[:30])
-                        button.connect('clicked', self.activate_window, window_id)
-                        self.append(button)
-                        self._window_buttons[window_id] = button
+                        window_button = self._button_pool.acquire()
+                        window_button.set_label(window_title[:30])
+                        window_button.connect('clicked', self.summon_window, window_id)
+                        self.append(window_button)
+                        self._window_buttons[window_id] = window_button
                     else:
-                        # Update existing button title
-                        self._window_buttons[window_id].set_label(title[:30])
+                        # Update the window's true name
+                        self._window_buttons[window_id].set_label(window_title[:30])
             
-            # Remove closed windows
-            for window_id in list(self._window_buttons.keys()):
-                if window_id not in current_windows:
-                    button = self._window_buttons.pop(window_id)
-                    self.remove(button)
-                    self._button_pool.release(button)
+            # Bid farewell to departed windows
+            for departed_id in list(self._window_buttons.keys()):
+                if departed_id not in surviving_windows:
+                    departed_button = self._window_buttons.pop(departed_id)
+                    self.remove(departed_button)
+                    self._button_pool.release(departed_button)
             
-        except Exception as e:
-            print(f"Window list update error: {e}")
+        except Exception as window_chaos:
+            print(f"Window list descended into chaos: {window_chaos}")
         
-        return True  # Keep the timeout going
+        return True  # The watch never ends
     
-    def activate_window(self, button, window_id):
-        """Activate window with error handling"""
+    def summon_window(self, button, window_id):
+        """Bring forth a window from the digital void"""
         try:
             subprocess.run(['wmctrl', '-ia', window_id], check=True)
-        except Exception as e:
-            print(f"Window activation error: {e}")
+        except Exception as summoning_mishap:
+            print(f"Window summoning ritual failed: {summoning_mishap}")
 
 class SystemMonitor(Gtk.Box):
-    """Optimized system monitor"""
+    """The all-seeing eye of system resources"""
     def __init__(self, update_manager):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         
         self._update_manager = update_manager
-        self._label = Gtk.Label()
-        self._label.add_css_class('monitor-label')
-        self.append(self._label)
+        self._prophecy_label = Gtk.Label()
+        self._prophecy_label.add_css_class('monitor-label')
+        self.append(self._prophecy_label)
         
-        # Initialize monitoring
+        # Begin the resource divination
         self._setup_monitoring()
         
     def _setup_monitoring(self):
-        """Set up system monitoring"""
+        """Establish connection with the silicon spirits"""
         self._nvidia = None
         try:
             nvmlInit()
             self._nvidia = nvmlDeviceGetHandleByIndex(0)
         except Exception:
-            print("NVIDIA monitoring unavailable")
+            print("NVIDIA crystal ball unavailable")
         
         self._cpu_cache = Cache(timeout=1000)
-        # Start immediate update
-        self._update_stats()
-        # Schedule regular updates with return True
-        GLib.timeout_add(3000, self._update_stats)
+        self._divine_resource_usage()
+        GLib.timeout_add(3000, self._divine_resource_usage)
     
-    def _update_stats(self):
-        """Update system stats efficiently"""
+    def _divine_resource_usage(self):
+        """Read the digital tea leaves of system resources"""
         try:
-            # Get CPU usage with caching
-            cpu = psutil.cpu_percent(interval=None)
+            # Consult the CPU oracle
+            cpu_load = psutil.cpu_percent(interval=None)
             
-            # Get memory usage
-            mem = psutil.virtual_memory()
-            ram = mem.percent
+            # Peek into the memory realm
+            memory_state = psutil.virtual_memory()
+            ram_usage = memory_state.percent
             
-            # Get GPU stats if available
+            # Check the GPU crystal ball if available
             if self._nvidia:
                 try:
-                    util = nvmlDeviceGetUtilizationRates(self._nvidia)
-                    mem = nvmlDeviceGetMemoryInfo(self._nvidia)
-                    gpu = util.gpu
-                    vram = (mem.used / mem.total) * 100
+                    gpu_prophecy = nvmlDeviceGetUtilizationRates(self._nvidia)
+                    gpu_memory = nvmlDeviceGetMemoryInfo(self._nvidia)
+                    gpu_load = gpu_prophecy.gpu
+                    vram_usage = (gpu_memory.used / gpu_memory.total) * 100
                 except:
-                    gpu = vram = 0
+                    gpu_load = vram_usage = 0
                 
-                self._label.set_label(
-                    f"CPU: {cpu:>5.1f}% | RAM: {ram:>5.1f}% | "
-                    f"GPU: {gpu:>5.1f}% | VRAM: {vram:>5.1f}%"
+                self._prophecy_label.set_label(
+                    f"CPU: {cpu_load:>5.1f}% | RAM: {ram_usage:>5.1f}% | "
+                    f"GPU: {gpu_load:>5.1f}% | VRAM: {vram_usage:>5.1f}%"
                 )
             else:
-                self._label.set_label(
-                    f"CPU: {cpu:>5.1f}% | RAM: {ram:>5.1f}%"
+                self._prophecy_label.set_label(
+                    f"CPU: {cpu_load:>5.1f}% | RAM: {ram_usage:>5.1f}%"
                 )
             
-        except Exception as e:
-            print(f"Stats update error: {e}")
+        except Exception as divination_failure:
+            print(f"Resource reading went awry: {divination_failure}")
         
-        return True
+        return True  # Continue the eternal watch
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class VoiceInputButton(Gtk.Button):
     """Optimized voice input button using system default audio"""
@@ -745,30 +819,39 @@ class MAGIPanel(Gtk.ApplicationWindow):
         button_box.set_halign(Gtk.Align.CENTER)
         button_box.set_hexpand(True)
         
+        # The keeper of settings
         settings_button = Gtk.Button()
         settings_button.set_child(Gtk.Image.new_from_icon_name("preferences-system-symbolic"))  
         settings_button.connect('clicked', lambda w:
             subprocess.Popen([sys.executable, 
                 os.path.join(os.path.dirname(__file__), 'settings.py')]))
         
+        # The context-aware question asker
         llm_button = self.create_llm_interface_button()
         
+        # The text-to-speech sage
         tts_button = Gtk.Button()
         tts_button.set_child(Gtk.Image.new_from_icon_name("audio-speakers-symbolic"))
         tts_button.connect('clicked', self._speak_selection)
         
+        # The quick dictation wizard
         voice_button = VoiceInputButton()
-
-        # Add new assistant button
+        
+        # The independent terminal sage
         assistant_button = Gtk.Button()
         assistant_button.set_child(Gtk.Image.new_from_icon_name("terminal-symbolic"))
         assistant_button.connect('clicked', self._launch_voice_assistant)
         
+        # The new whispering ear
+        whispering_ear = WhisperingEarButton()
+        
+        # Arrange the mystical buttons in their proper order
         button_box.append(settings_button)
         button_box.append(llm_button)
         button_box.append(tts_button)
         button_box.append(voice_button)
         button_box.append(assistant_button)
+        button_box.append(whispering_ear)
         
         box.append(button_box)
         self.box.append(box)

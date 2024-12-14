@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""
+MAGI Model Manager
+A Comedy in Several Acts
+Featuring: Whispers, Oracles, and a Baritone Cast
+"""
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -13,280 +18,429 @@ import time
 import numpy as np
 import psutil
 import socket
+from dataclasses import dataclass
+from typing import Optional, Tuple
 from ThemeManager import ThemeManager
 from pathlib import Path
 
-# Get script directory for relative paths
-SCRIPT_DIR = Path(__file__).parent.absolute()
-VENV_DIR = SCRIPT_DIR / 'ears_pyenv'
-WHISPER_SERVER = SCRIPT_DIR / 'whisper_server.py'
+# The Stage Directory
+BACKSTAGE = Path(__file__).parent.absolute()
+COSTUME_CLOSET = BACKSTAGE / 'ears_pyenv'
+WHISPER_SCRIPT = BACKSTAGE / 'whisper_server.py'
+BARITONE_SCRIPT = BACKSTAGE / 'voice.py'
 
-def find_process_by_port(port):
-    """Find process using a specific port"""
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+@dataclass
+class BaritoneWrangler:
+    """Master of the Deep-Voiced Performers"""
+    voice_artist: Optional[subprocess.Popen] = None
+    green_room: Path = Path('/tmp/magi_realm/say')
+    current_voice: str = "p326"  # Our leading bass
+    
+    def summon_the_bass_section(self) -> Tuple[bool, str]:
+        """Raise the curtain on our deep-voiced performers"""
         try:
-            for conn in proc.connections('tcp'):
-                if conn.laddr.port == port:
-                    return proc
+            self.green_room.mkdir(parents=True, exist_ok=True)
+            self._escort_current_performer_offstage()
+            
+            self.voice_artist = subprocess.Popen([
+                'python3', str(BARITONE_SCRIPT)
+            ])
+            
+            return self._await_dramatic_entrance()
+            
+        except Exception as stage_fright:
+            return False, f"Performance anxiety: {stage_fright}"
+    
+    def _escort_current_performer_offstage(self):
+        """Politely show our current voice actor to the exit"""
+        if self.voice_artist:
+            try:
+                self.voice_artist.terminate()
+                self.voice_artist.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.voice_artist.kill()
+            self.voice_artist = None
+    
+    def _await_dramatic_entrance(self) -> Tuple[bool, str]:
+        """Wait in the wings for our voice to warm up"""
+        test_script = self.green_room / f"sound_check_{time.time()}.txt"
+        try:
+            test_script.write_text("♪ Do-Re-Mi ♪")
+            time.sleep(2)  # Brief pause for dramatic effect
+            
+            if not test_script.exists():
+                return True, "Voice warmed up and ready for the spotlight!"
+            else:
+                test_script.unlink()
+                return False, "Voice caught a case of stage fright"
+        except Exception as vocal_strain:
+            return False, f"Technical difficulties: {vocal_strain}"
+    
+    def still_breathing(self) -> bool:
+        """Make sure our vocalist hasn't fainted"""
+        return self.voice_artist and self.voice_artist.poll() is None
+    
+    def clear_the_stage(self):
+        """Time to go home, everyone"""
+        self._escort_current_performer_offstage()
+
+def find_process_monopolizing_port(port):
+    """Hunt down the process hogging our stage"""
+    for performer in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            for connection in performer.connections('tcp'):
+                if connection.laddr.port == port:
+                    return performer
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
     return None
 
-def kill_process_on_port(port):
-    """Kill any process using the specified port"""
-    proc = find_process_by_port(port)
-    if proc:
+def escort_squatter_from_port(port):
+    """Politely remove any process squatting on our port"""
+    squatter = find_process_monopolizing_port(port)
+    if squatter:
         try:
-            proc.terminate()
+            squatter.terminate()
             try:
-                proc.wait(timeout=3)
+                squatter.wait(timeout=3)
             except psutil.TimeoutExpired:
-                proc.kill()
+                squatter.kill()
             return True
         except psutil.NoSuchProcess:
             pass
     return False
 
-def is_port_in_use(port):
-    """Check if a port is in use"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('localhost', port)) == 0
+def is_stage_door_locked(port):
+    """Check if someone's already using our stage door (port)"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as door:
+        return door.connect_ex(('localhost', port)) == 0
 
-def update_start_script():
-    """Update the start_whisper_server.sh script with correct paths"""
-    script_content = f"""#!/bin/bash
-# Activate virtualenv
-source "{VENV_DIR}/bin/activate"
-# Set proper Python path
-export PYTHONPATH="{VENV_DIR}/lib/python3.11/site-packages"
-# Start the server
-exec python3 "{WHISPER_SERVER}"
+def update_whisper_script():
+    """Update the Whisper's entrance cue"""
+    script = f"""#!/bin/bash
+source "{COSTUME_CLOSET}/bin/activate"
+export PYTHONPATH="{COSTUME_CLOSET}/lib/python3.11/site-packages"
+exec python3 "{WHISPER_SCRIPT}"
 """
     
-    script_path = SCRIPT_DIR / 'start_whisper_server.sh'
+    script_path = BACKSTAGE / 'start_whisper_server.sh'
     with open(script_path, 'w') as f:
-        f.write(script_content)
+        f.write(script)
     os.chmod(script_path, 0o755)
 
+def prepare_voice_monitoring(window):
+    """Set up the voice monitoring section of our variety show"""
+    # Create the vocalist's personal stage
+    voice_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    
+    # The marquee featuring our star
+    voice_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    window.voice_indicator = Gtk.Label(label="●")
+    voice_header.append(window.voice_indicator)
+    voice_header.append(Gtk.Label(label="THE BARITONE"))
+    voice_box.append(voice_header)
+    
+    # The critics' corner
+    window.voice_status_label = Gtk.Label()
+    window.voice_status_label.set_xalign(0)
+    voice_box.append(window.voice_status_label)
+    
+    # Find the main stage (our containing box)
+    main_stage = window.get_child()
+    
+    # Place our act in the show lineup, right after the Oracle
+    main_stage.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+    main_stage.append(voice_box)
+    
+    # Prepare the voice director
+    window.voice_manager = BaritoneWrangler()
+    window.voice_status = "Starting"
+    
+    # Update the status board with our new performer
+    original_update = window.update_status_displays
+    def new_update_status_displays():
+        original_update()
+        def update_indicator(spotlight, dramatic_state):
+            """The Grand Illuminator of Status Indicators"""
+            # First, dim all the lights
+            spotlight.remove_css_class('status-running')   # The "all is well" green glow
+            spotlight.remove_css_class('status-error')     # The "panic mode" red alert
+            spotlight.remove_css_class('status-loading')   # The "please hold" amber hue
+            
+            # Now, for the dramatic lighting reveal...
+            match dramatic_state:
+                case "Running":
+                    spotlight.add_css_class('status-running')    # A triumphant green!
+                case "Error":
+                    spotlight.add_css_class('status-error')      # A concerning crimson!
+                case _:
+                    spotlight.add_css_class('status-loading')    # An anticipatory amber!
+        update_indicator(window.voice_indicator, window.voice_status)
+    window.update_status_displays = new_update_status_displays
+    
+    # Add voice check to the daily rehearsal
+    original_check = window.check_model_status
+    def new_check_model_status():
+        if window.verification_in_progress:
+            return
+        
+        window.verification_in_progress = True
+        window.check_button.set_sensitive(False)
+        
+        def verify_full_cast():
+            # Check if our baritone is still conscious
+            if window.voice_manager.still_breathing():
+                window.set_voice_status("Running", "Voice projection optimal!")
+            else:
+                success, message = window.voice_manager.summon_the_bass_section()
+                if success:
+                    window.set_voice_status("Running", "Voice ready to rumble!")
+                else:
+                    window.set_voice_status("Error", message)
+            
+            # Check the rest of the cast
+            original_check()
+        
+        threading.Thread(target=verify_full_cast, daemon=True).start()
+    
+    window.check_model_status = new_check_model_status
+    
+    # Add the voice status board updater
+    def set_voice_status(status, message=""):
+        window.voice_status = status
+        window.voice_status_label.set_text(message)
+        window.update_status_displays()
+    window.set_voice_status = set_voice_status
+    
+    # Enhance the final curtain call
+    original_cleanup = window.cleanup
+    def new_cleanup():
+        window.voice_manager.clear_the_stage()
+        original_cleanup()
+    window.cleanup = new_cleanup
+    
+    # Raise the curtain on our vocal performer
+    success, message = window.voice_manager.summon_the_bass_section()
+    if success:
+        window.set_voice_status("Running", "Voice ready for its solo!")
+    else:
+        window.set_voice_status("Error", message)
+
 class ModelManager(Gtk.ApplicationWindow):
+    """The Grand Theater of AI Models"""
+    
     def __init__(self, app):
         super().__init__(application=app)
         
-        # Remove window decorations
+        # No fancy decorations for our stage
         self.set_decorated(False)
-        
-        # Connect realize signal for window properties
         self.connect('realize', self._on_realize)
         
-        # Clean up only Whisper server
-        if is_port_in_use(5000):
-            print("Cleaning up old Whisper server...")
-            kill_process_on_port(5000)
-            time.sleep(1)  # Give time for cleanup
+        # Clear any lingering performers
+        if is_stage_door_locked(5000):
+            print("Escorting the previous Whisper from the premises...")
+            escort_squatter_from_port(5000)
+            time.sleep(1)
         
-        # Load config first
+        # Load the playbill
         self.load_config()
         
-        # Register with theme manager
+        # Get our costume designer
         self.theme_manager = ThemeManager()
         self.theme_manager.register_window(self)
         
+        # Our Whisper starts in the wings
         self.whisper_server_process = None
-        self.setup_window()
+        self.setup_theater()
         
-        # Initialize states
+        # Set the initial mood
         self.whisper_status = "Starting"
         self.whisper_progress = 0
         self.ollama_status = "Starting"
         self.ollama_progress = 0
         
-        # Track if verification is in progress
+        # Add our voice monitor to the production
+        prepare_voice_monitoring(self)
+        
+        # Are we in rehearsal?
         self.verification_in_progress = False
         
-        # Start GPU monitoring
+        # Start monitoring the power consumption
         GLib.timeout_add(3000, self.update_gpu_status)
         
-        # Update start script and start models
+        # Places everyone!
         try:
-            update_start_script()
-            self.start_whisper_server()
-            self.check_ollama_service()  # Changed from start_ollama_server
-        except Exception as e:
-            print(f"Startup error: {e}")
+            update_whisper_script()
+            self.summon_whisper_oracle()
+            self.check_ollama_presence()
+        except Exception as opening_night_jitters:
+            print(f"First night nerves: {opening_night_jitters}")
         
-        # Initial status check after startup
+        # Schedule first review
         GLib.timeout_add(5000, self.initial_status_check)
-    
     def _on_realize(self, widget):
-        """Set window properties after window is realized"""
-        def set_window_properties():
+        """Set the stage after the curtain rises"""
+        def arrange_scenery():
             try:
-                # Get window ID
-                output = subprocess.check_output(
+                # Find our stage number
+                playbill = subprocess.check_output(
                     ['xdotool', 'search', '--name', '^MAGI Model Status$']
                 ).decode().strip()
                 
-                if output:
-                    window_id = output.split('\n')[0]
-                    # Set window to stay below others and stick to all workspaces
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,below,sticky'], check=True)
-                    # Make window appear on all workspaces
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-t', '-1'], check=True)
-            except Exception as e:
-                print(f"Failed to set window properties: {e}")
+                if playbill:
+                    stage_number = playbill.split('\n')[0]
+                    # Make sure we're visible from all seats
+                    subprocess.run(['wmctrl', '-i', '-r', stage_number, '-b', 'add,below,sticky'], check=True)
+                    # Perform in all theaters simultaneously
+                    subprocess.run(['wmctrl', '-i', '-r', stage_number, '-t', '-1'], check=True)
+            except Exception as scenery_collapse:
+                print(f"Stage decoration malfunction: {scenery_collapse}")
             return False
         
-        # Give window time to be created before setting properties
-        GLib.timeout_add(100, set_window_properties)
+        # Give the stagehands time to set up
+        GLib.timeout_add(100, arrange_scenery)
     
     def initial_status_check(self):
-        """Perform initial status check after startup"""
+        """Opening night pre-show check"""
         self.check_model_status()
-        return False  # Don't repeat
+        return False
     
-    def setup_window(self):
-        """Set up the window with minimal layout"""
+    def setup_theater(self):
+        """Prepare our grand theater for the performance"""
         self.set_title("MAGI Model Status")
         self.set_default_size(400, 200)
         
-        # Main box
-        main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        main_box.set_margin_start(16)
-        main_box.set_margin_end(16)
-        main_box.set_margin_top(16)
-        main_box.set_margin_bottom(16)
+        # The main stage
+        stage = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        stage.set_margin_start(16)
+        stage.set_margin_end(16)
+        stage.set_margin_top(16)
+        stage.set_margin_bottom(16)
         
-        # Status check button at top
-        check_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        check_box.set_halign(Gtk.Align.END)
-        self.check_button = Gtk.Button(label="Check Models Now")
+        # The director's button
+        directors_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        directors_box.set_halign(Gtk.Align.END)
+        self.check_button = Gtk.Button(label="Check The Cast")
         self.check_button.connect('clicked', lambda _: self.check_model_status())
-        check_box.append(self.check_button)
-        main_box.append(check_box)
+        directors_box.append(self.check_button)
+        stage.append(directors_box)
         
-        # Whisper section
-        whisper_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        # The Whisper's Corner
+        whisper_stage = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         
-        # Header with status
-        whisper_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        # Whisper's nameplate
+        whisper_marquee = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.whisper_indicator = Gtk.Label(label="●")
-        whisper_header.append(self.whisper_indicator)
-        whisper_header.append(Gtk.Label(label="WHISPER"))
-        whisper_box.append(whisper_header)
+        whisper_marquee.append(self.whisper_indicator)
+        whisper_marquee.append(Gtk.Label(label="THE WHISPER"))
+        whisper_stage.append(whisper_marquee)
         
-        # Progress bar
+        # Whisper's progress tracker
         self.whisper_progress_bar = Gtk.ProgressBar()
         self.whisper_progress_bar.set_hexpand(True)
-        whisper_box.append(self.whisper_progress_bar)
+        whisper_stage.append(self.whisper_progress_bar)
         
-        # Status label
+        # Whisper's current state
         self.whisper_status_label = Gtk.Label()
         self.whisper_status_label.set_xalign(0)
-        whisper_box.append(self.whisper_status_label)
+        whisper_stage.append(self.whisper_status_label)
         
-        main_box.append(whisper_box)
+        stage.append(whisper_stage)
+        stage.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
         
-        # Separator
-        main_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        # The Oracle's Domain
+        oracle_stage = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         
-        # Ollama section
-        ollama_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        
-        # Header with status
-        ollama_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        # Oracle's nameplate
+        oracle_marquee = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.ollama_indicator = Gtk.Label(label="●")
-        ollama_header.append(self.ollama_indicator)
+        oracle_marquee.append(self.ollama_indicator)
         model_name = self.config.get('ollama_model', 'mistral').upper()
-        ollama_header.append(Gtk.Label(label=f"OLLAMA ({model_name})"))
-        ollama_box.append(ollama_header)
+        oracle_marquee.append(Gtk.Label(label=f"THE ORACLE ({model_name})"))
+        oracle_stage.append(oracle_marquee)
         
-        # Progress bar
+        # Oracle's progress tracker
         self.ollama_progress_bar = Gtk.ProgressBar()
         self.ollama_progress_bar.set_hexpand(True)
-        ollama_box.append(self.ollama_progress_bar)
+        oracle_stage.append(self.ollama_progress_bar)
         
-        # Status label
+        # Oracle's prophecies
         self.ollama_status_label = Gtk.Label()
         self.ollama_status_label.set_xalign(0)
-        ollama_box.append(self.ollama_status_label)
+        oracle_stage.append(self.ollama_status_label)
         
-        main_box.append(ollama_box)
+        stage.append(oracle_stage)
+        stage.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
         
-        # Separator
-        main_box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        
-        # GPU status
+        # The Power Meter
         self.gpu_info = Gtk.Label()
         self.gpu_info.set_xalign(0)
-        main_box.append(self.gpu_info)
+        stage.append(self.gpu_info)
         
-        # Last check time
+        # The Time Keeper
         self.last_check_label = Gtk.Label()
         self.last_check_label.set_xalign(1)
-        main_box.append(self.last_check_label)
+        stage.append(self.last_check_label)
         
-        self.set_child(main_box)
-
+        self.set_child(stage)
     
     def load_config(self):
-        """Load MAGI configuration"""
-        config_path = os.path.expanduser("~/.config/magi/config.json")
+        """Read the director's notes"""
+        playbill_location = os.path.expanduser("~/.config/magi/config.json")
         try:
-            with open(config_path) as f:
-                self.config = json.load(f)
+            with open(playbill_location) as playbill:
+                self.config = json.load(playbill)
         except Exception:
             self.config = {'ollama_model': 'mistral'}
     
     def check_model_status(self):
-        """Perform a deep check of both models"""
+        """Perform a full cast check"""
         if self.verification_in_progress:
-            print("Verification already in progress, skipping...")
+            print("Rehearsal already in progress, please wait...")
             return
         
-        print("Performing deep status check...")
+        print("Checking on all our performers...")
         self.verification_in_progress = True
         self.check_button.set_sensitive(False)
         
-        def verify_models():
-            # Check Whisper
+        def inspect_the_talent():
+            # Check on our Whisper
             try:
-                GLib.idle_add(self.set_whisper_status, "Checking", 50, "Testing connection...")
+                GLib.idle_add(self.set_whisper_status, "Checking", 50, "Testing the acoustics...")
                 
-                # First check status endpoint
                 try:
-                    status_response = requests.get('http://localhost:5000/status', timeout=5)
-                    if status_response.ok:
-                        # Then verify with transcription
-                        audio_data = np.zeros(8000, dtype=np.float32)
-                        files = {'audio': ('test.wav', audio_data.tobytes())}
-                        response = requests.post('http://localhost:5000/transcribe', 
-                                            files=files, timeout=10)
-                        if response.ok:
-                            GLib.idle_add(self.set_whisper_status, "Running", 100, "Model verified")
+                    sound_check = requests.get('http://localhost:5000/status', timeout=5)
+                    if sound_check.ok:
+                        # Test the microphone
+                        silence = np.zeros(8000, dtype=np.float32)
+                        files = {'audio': ('silence.wav', silence.tobytes())}
+                        mic_check = requests.post('http://localhost:5000/transcribe', 
+                                               files=files, timeout=10)
+                        if mic_check.ok:
+                            GLib.idle_add(self.set_whisper_status, "Running", 100, "Ready to whisper")
                         else:
-                            GLib.idle_add(self.set_whisper_status, "Loading", 50, "Model initializing...")
+                            GLib.idle_add(self.set_whisper_status, "Loading", 50, "Warming up...")
                     else:
-                        GLib.idle_add(self.set_whisper_status, "Error", 0, "Server not responding")
+                        GLib.idle_add(self.set_whisper_status, "Error", 0, "Lost their voice")
                 except requests.exceptions.ConnectionError:
-                    GLib.idle_add(self.set_whisper_status, "Error", 0, "Server not running")
+                    GLib.idle_add(self.set_whisper_status, "Error", 0, "Missed their cue")
                 except requests.exceptions.Timeout:
-                    GLib.idle_add(self.set_whisper_status, "Loading", 50, "Model initializing...")
+                    GLib.idle_add(self.set_whisper_status, "Loading", 50, "Still in makeup...")
                 
-            except Exception as e:
-                print(f"Whisper verification error: {e}")
-                GLib.idle_add(self.set_whisper_status, "Error", 0, str(e))
-            
-            # Check Ollama with more thorough verification
+            except Exception as whisper_mishap:
+                print(f"Whisper had a moment: {whisper_mishap}")
+                GLib.idle_add(self.set_whisper_status, "Error", 0, str(whisper_mishap))
+
+            # Check on our Oracle
             try:
-                print("DEBUG: Performing thorough Ollama check...")
-                def verify_ollama_ready():
+                print("DEBUG: Consulting with the Oracle...")
+                def verify_oracle_consciousness():
                     try:
-                        # Test with a more complex prompt to ensure model is loaded
                         response = requests.post(
                             'http://localhost:11434/api/generate',
                             json={
                                 'model': self.config.get('ollama_model', 'mistral'),
-                                'prompt': 'Explain in 5 words: What is AI?',
+                                'prompt': 'Speak, O wise one!',
                                 'options': {
                                     'num_predict': 20
                                 }
@@ -297,211 +451,246 @@ class ModelManager(Gtk.ApplicationWindow):
                     except:
                         return False
                 
-                # Try verification multiple times
+                # Try to wake the Oracle three times
                 for attempt in range(3):
-                    if verify_ollama_ready():
-                        GLib.idle_add(self.set_ollama_status, "Running", 100, "Model verified")
+                    if verify_oracle_consciousness():
+                        GLib.idle_add(self.set_ollama_status, "Running", 100, "Oracle is prophesying")
                         break
-                    elif attempt < 2:  # Don't sleep on last attempt
+                    elif attempt < 2:
                         time.sleep(5)
                 else:
-                    # If we get here, verification failed
                     GLib.idle_add(self.set_ollama_status, "Loading", 70, 
-                                "Loading model into VRAM (this may take several minutes)...")
-                    # Start the loading process again
-                    threading.Thread(target=self.load_ollama_model, daemon=True).start()
+                                "Oracle is meditating (this may take time)...")
+                    threading.Thread(target=self.awaken_oracle, daemon=True).start()
                     
-            except Exception as e:
-                print(f"Ollama verification error: {e}")
-                if "Connection refused" in str(e):
-                    msg = "Ollama service not running - please start with: systemctl start ollama"
+            except Exception as oracle_confusion:
+                print(f"Oracle is puzzled: {oracle_confusion}")
+                if "Connection refused" in str(oracle_confusion):
+                    msg = "Oracle missed their entrance - start with: systemctl start ollama"
                 else:
-                    msg = str(e)
+                    msg = str(oracle_confusion)
                 GLib.idle_add(self.set_ollama_status, "Error", 0, msg)
             
-            # Update last check time
-            check_time = time.strftime("%H:%M:%S")
-            GLib.idle_add(self.last_check_label.set_text, f"Last checked: {check_time}")
+            # Update the timekeeper
+            performance_time = time.strftime("%H:%M:%S")
+            GLib.idle_add(self.last_check_label.set_text, f"Last curtain call: {performance_time}")
             
-            # Reset verification state
+            # Reset the director's button
             GLib.idle_add(self._reset_verification_state)
         
-        # Run verification in background
-        threading.Thread(target=verify_models, daemon=True).start()
-    
+        # Begin the inspection in the background
+        threading.Thread(target=inspect_the_talent, daemon=True).start()
     def _reset_verification_state(self):
-        """Reset verification state and button"""
+        """Let the director push their button again"""
         self.verification_in_progress = False
         self.check_button.set_sensitive(True)
     
-    def start_whisper_server(self):
-        """Start the Whisper server"""
+    def summon_whisper_oracle(self):
+        """Coax our shy performer onto the stage"""
         try:
-            # Check if port is in use and clean up
-            if is_port_in_use(5000):
-                print("Cleaning up old Whisper server...")
-                kill_process_on_port(5000)
-                time.sleep(1)  # Give the port time to be released
+            # Check if someone's hogging the microphone
+            if is_stage_door_locked(5000):
+                print("Politely removing previous performer...")
+                escort_squatter_from_port(5000)
+                time.sleep(1)  # Moment of silence
             
-            # Clean up any existing progress file
+            # Clean up any remnants of past performances
             try:
                 os.remove('/tmp/MAGI/whisper_progress')
             except FileNotFoundError:
-                pass
+                pass  # No encore to clean up
             
-            script_path = str(SCRIPT_DIR / 'start_whisper_server.sh')
-            self.whisper_server_process = subprocess.Popen([script_path])
-            print(f"Started Whisper server with script: {script_path}")
-            self.set_whisper_status("Starting", 10, "Starting server...")
+            # Send in our performer
+            stage_directions = str(BACKSTAGE / 'start_whisper_server.sh')
+            self.whisper_server_process = subprocess.Popen([stage_directions])
+            print(f"Whisper enters stage left: {stage_directions}")
+            self.set_whisper_status("Starting", 10, "Clearing throat...")
             
-            def monitor_whisper_startup():
-                """Monitor Whisper server startup using status endpoint"""
-                retry_count = 0
-                server_started = False
+            def monitor_whisper_preparation():
+                """Watch our performer prepare"""
+                rehearsal_count = 0
+                has_appeared = False
                 
-                while retry_count < 180:  # Increase timeout to 15 minutes (180 * 5 seconds)
+                while rehearsal_count < 180:  # 15 minutes of fame
                     try:
-                        # First try status endpoint
-                        status_response = requests.get('http://localhost:5000/status', timeout=5)
-                        if status_response.ok:
-                            status_data = status_response.json()
-                            server_started = True
+                        # Check if they're ready
+                        status_check = requests.get('http://localhost:5000/status', timeout=5)
+                        if status_check.ok:
+                            status_report = status_check.json()
+                            has_appeared = True
                             
-                            # Check server status
-                            if status_data['percentage'] == 100:
-                                # Verify server is truly ready with transcription test
+                            if status_report['percentage'] == 100:
+                                # Final sound check
                                 try:
-                                    audio_data = np.zeros(8000, dtype=np.float32)
-                                    files = {'audio': ('test.wav', audio_data.tobytes())}
-                                    test_response = requests.post('http://localhost:5000/transcribe', 
-                                                            files=files, timeout=10)
-                                    if test_response.ok:
-                                        GLib.idle_add(self.set_whisper_status, "Running", 100, 
-                                                    "Model loaded and ready")
+                                    silence = np.zeros(8000, dtype=np.float32)
+                                    files = {'audio': ('silence.wav', silence.tobytes())}
+                                    voice_test = requests.post(
+                                        'http://localhost:5000/transcribe', 
+                                        files=files, 
+                                        timeout=10
+                                    )
+                                    if voice_test.ok:
+                                        GLib.idle_add(
+                                            self.set_whisper_status, 
+                                            "Running", 
+                                            100, 
+                                            "Voice crystal clear"
+                                        )
                                         return
                                 except requests.exceptions.RequestException:
-                                    # If test fails but server is up, show correct loading state
-                                    GLib.idle_add(self.set_whisper_status, "Starting", 
-                                                status_data['percentage'], 
-                                                status_data['message'])
+                                    GLib.idle_add(
+                                        self.set_whisper_status, 
+                                        "Starting",
+                                        status_report['percentage'],
+                                        status_report['message']
+                                    )
                             else:
-                                # Update with server's status
-                                GLib.idle_add(self.set_whisper_status, "Starting", 
-                                            status_data['percentage'], 
-                                            status_data['message'])
+                                GLib.idle_add(
+                                    self.set_whisper_status, 
+                                    "Starting",
+                                    status_report['percentage'],
+                                    status_report['message']
+                                )
                         
                     except requests.exceptions.ConnectionError:
-                        # Only update status if we haven't detected server yet
-                        if not server_started:
-                            GLib.idle_add(self.set_whisper_status, "Starting", 10, 
-                                        "Waiting for server to start...")
-                    except Exception as e:
-                        print(f"Whisper startup monitoring error: {e}")
+                        if not has_appeared:
+                            GLib.idle_add(
+                                self.set_whisper_status, 
+                                "Starting", 
+                                10,
+                                "In the green room..."
+                            )
+                    except Exception as stage_fright:
+                        print(f"Performance anxiety: {stage_fright}")
                     
-                    retry_count += 1
-                    time.sleep(5)  # Check every 5 seconds
+                    rehearsal_count += 1
+                    time.sleep(5)
                 
-                # Only show timeout if server never started
-                if not server_started:
-                    GLib.idle_add(self.set_whisper_status, "Error", 0, 
-                                "Server startup timeout - please check system resources")
-                
-            # Start monitoring thread
-            threading.Thread(target=monitor_whisper_startup, daemon=True).start()
+                if not has_appeared:
+                    GLib.idle_add(
+                        self.set_whisper_status, 
+                        "Error", 
+                        0,
+                        "Missed their cue - check the dressing room"
+                    )
             
-        except Exception as e:
-            print(f"Failed to start Whisper server: {e}")
-            self.set_whisper_status("Error", 0, f"Failed to start: {e}")
-
+            # Start our stage manager
+            threading.Thread(target=monitor_whisper_preparation, daemon=True).start()
+            
+        except Exception as opening_night_disaster:
+            print(f"Opening night crisis: {opening_night_disaster}")
+            self.set_whisper_status(
+                "Error", 
+                0, 
+                f"Failed to perform: {opening_night_disaster}"
+            )
     
-    def check_ollama_service(self):
-        """Check Ollama service status without trying to manage it"""
+    def check_ollama_presence(self):
+        """See if our Oracle has arrived at the theater"""
         try:
-            self.set_ollama_status("Starting", 10, "Checking Ollama service...")
+            self.set_ollama_status("Starting", 10, "Checking the crystal ball...")
             try:
-                response = requests.get('http://localhost:11434/api/version', timeout=30)
-                if response.ok:
-                    # Server is running, proceed to model check
-                    threading.Thread(target=self.load_ollama_model, daemon=True).start()
-                    self.set_ollama_status("Starting", 20, "Service connected, loading model (this may take several minutes)...")
+                mystic_response = requests.get('http://localhost:11434/api/version', timeout=30)
+                if mystic_response.ok:
+                    # Oracle is in the building
+                    threading.Thread(target=self.awaken_oracle, daemon=True).start()
+                    self.set_ollama_status(
+                        "Starting", 
+                        20, 
+                        "Oracle is preparing their prophecies..."
+                    )
                 else:
-                    self.set_ollama_status("Error", 0, "Ollama service not responding. Please start with: systemctl start ollama")
+                    self.set_ollama_status(
+                        "Error", 
+                        0, 
+                        "Oracle is confused. Summon with: systemctl start ollama"
+                    )
             except requests.exceptions.ConnectionError:
-                self.set_ollama_status("Error", 0, "Ollama service not running - please start with: systemctl start ollama")
-                print("Ollama service not detected - please ensure it's running with: systemctl start ollama")
+                self.set_ollama_status(
+                    "Error", 
+                    0, 
+                    "Oracle absent - summon with: systemctl start ollama"
+                )
+                print("Oracle not found - ensure their presence with: systemctl start ollama")
             except requests.exceptions.Timeout:
-                # If initial connection times out, we'll keep trying
-                self.set_ollama_status("Starting", 15, "Waiting for service to respond...")
-                threading.Thread(target=self.monitor_ollama_startup, daemon=True).start()
-        except Exception as e:
-            # Provide a more user-friendly error message
-            if "Connection refused" in str(e):
-                msg = "Ollama service not running - please start with: systemctl start ollama"
-            else:
-                msg = f"Service check failed: {e}"
-            print(f"Ollama check error: {e}")
+                self.set_ollama_status("Starting", 15, "Oracle is fashionably late...")
+                threading.Thread(target=self.monitor_oracle_arrival, daemon=True).start()
+        except Exception as mystical_mishap:
+            msg = ("Oracle missed their entrance - start with: systemctl start ollama" 
+                  if "Connection refused" in str(mystical_mishap) 
+                  else f"Mystical malfunction: {mystical_mishap}")
+            print(f"Oracle confusion: {mystical_mishap}")
             self.set_ollama_status("Error", 0, msg)
-
     
-    def monitor_ollama_startup(self):
-        """Monitor Ollama service startup"""
-        retry_count = 0
-        while retry_count < 30:  # Try for up to 15 minutes
+    def monitor_oracle_arrival(self):
+        """Wait for our Oracle to make their grand entrance"""
+        attempts = 0
+        while attempts < 30:  # 15 minutes of patience
             try:
-                response = requests.get('http://localhost:11434/api/version', timeout=30)
-                if response.ok:
-                    threading.Thread(target=self.load_ollama_model, daemon=True).start()
+                mystic_check = requests.get('http://localhost:11434/api/version', timeout=30)
+                if mystic_check.ok:
+                    threading.Thread(target=self.awaken_oracle, daemon=True).start()
                     return
             except:
-                retry_count += 1
-                progress = min(60, 15 + (retry_count * 2))
-                GLib.idle_add(self.set_ollama_status, "Starting", progress, 
-                            "Waiting for service to start...")
+                attempts += 1
+                progress = min(60, 15 + (attempts * 2))
+                GLib.idle_add(
+                    self.set_ollama_status, 
+                    "Starting", 
+                    progress,
+                    "Awaiting the Oracle's arrival..."
+                )
             time.sleep(30)
         
-        GLib.idle_add(self.set_ollama_status, "Error", 0, 
-                    "Service startup timeout - please check system status")
+        GLib.idle_add(
+            self.set_ollama_status, 
+            "Error", 
+            0,
+            "Oracle got lost - check the mystic pathways"
+        )
     
-    def load_ollama_model(self):
-        """Load Ollama model with improved ready-state detection"""
+    def awaken_oracle(self):
+        """Gently rouse our Oracle from their meditation"""
         try:
             model_name = self.config.get('ollama_model', 'mistral')
-            print(f"\nDEBUG: Starting Ollama model check for {model_name}")
+            print(f"\nDEBUG: Awakening the {model_name} Oracle")
             
-            # Update status to show we're loading
-            GLib.idle_add(self.set_ollama_status, "Loading", 70, 
-                        "Loading model into VRAM (this may take several minutes)...")
+            GLib.idle_add(
+                self.set_ollama_status, 
+                "Loading", 
+                70,
+                "Oracle entering trance state (patience required)..."
+            )
             
-            def verify_model_ready():
-                """Verify model is truly ready by running a quick inference"""
+            def verify_oracle_consciousness():
+                """Check if the Oracle is truly awake"""
                 try:
-                    # Use a simple test prompt
                     response = requests.post(
                         'http://localhost:11434/api/generate',
                         json={
                             'model': model_name,
-                            'prompt': 'Say "ready" if you can process this.',
+                            'prompt': 'Are you awakened, O wise one?',
                             'options': {
                                 'num_predict': 10,
                                 'temperature': 0
                             }
                         },
-                        timeout=30  # Short timeout for ready check
+                        timeout=30
                     )
                     return response.ok and len(response.text) > 0
                 except:
                     return False
             
-            # Start monitoring loop
-            retry_count = 0
-            while retry_count < 30:  # Try for up to 15 minutes
+            # Begin the awakening ritual
+            meditation_count = 0
+            while meditation_count < 30:  # 15 minutes of spiritual patience
                 try:
-                    # First check if model is pulled/present
+                    # Gentle prodding
                     response = requests.post(
                         'http://localhost:11434/api/generate',
                         json={
                             'model': model_name,
-                            'prompt': 'Hi',
+                            'prompt': 'Awaken',
                             'options': {
                                 'num_predict': 1,
                                 'temperature': 0
@@ -511,79 +700,78 @@ class ModelManager(Gtk.ApplicationWindow):
                     )
                     
                     if response.ok:
-                        # Model responded, but let's verify it's truly ready
-                        for _ in range(3):  # Try verification up to 3 times
-                            if verify_model_ready():
+                        # Triple-check their consciousness
+                        for _ in range(3):
+                            if verify_oracle_consciousness():
                                 GLib.idle_add(
                                     self.set_ollama_status,
                                     "Running",
                                     100,
-                                    "Model loaded and ready"
+                                    "Oracle's third eye is open"
                                 )
                                 return
-                            time.sleep(5)  # Wait between verification attempts
+                            time.sleep(5)
                         
-                        # If we get here, model responded but might not be fully ready
-                        retry_count += 1
-                        progress = min(95, 70 + (retry_count))
+                        # Semi-conscious state
+                        meditation_count += 1
+                        progress = min(95, 70 + meditation_count)
                         GLib.idle_add(
                             self.set_ollama_status,
                             "Loading",
                             progress,
-                            "Model completing initialization..."
+                            "Oracle approaching enlightenment..."
                         )
                     else:
-                        retry_count += 1
-                        progress = min(90, 70 + (retry_count))
+                        meditation_count += 1
+                        progress = min(90, 70 + meditation_count)
                         GLib.idle_add(
                             self.set_ollama_status,
                             "Loading",
                             progress,
-                            "Loading model into VRAM (this may take several minutes)..."
+                            "Oracle deep in meditation..."
                         )
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                    retry_count += 1
-                    progress = min(90, 70 + (retry_count))
+                    meditation_count += 1
+                    progress = min(90, 70 + meditation_count)
                     GLib.idle_add(
                         self.set_ollama_status,
                         "Loading",
                         progress,
-                        "Loading model into VRAM (this may take several minutes)..."
+                        "Oracle contemplating existence..."
                     )
-                except Exception as e:
-                    print(f"DEBUG: Unexpected error during Ollama loading: {e}")
+                except Exception as spiritual_crisis:
+                    print(f"DEBUG: Oracle's spiritual emergency: {spiritual_crisis}")
                 
-                time.sleep(30)  # Check every 30 seconds
+                time.sleep(30)
             
-            # Only show error if we never succeeded
+            # Meditation timeout
             GLib.idle_add(
                 self.set_ollama_status,
                 "Error",
                 0,
-                "Model load timeout - please check system resources"
+                "Oracle stuck in meditation - check their incense"
             )
             
-        except Exception as e:
-            if "Connection refused" in str(e):
-                msg = "Ollama service not running - please start with: systemctl start ollama"
-            else:
-                msg = str(e)
-            print(f"DEBUG: Unexpected error in load_ollama_model: {e}")
+        except Exception as metaphysical_mishap:
+            msg = ("Oracle needs summoning: systemctl start ollama" 
+                  if "Connection refused" in str(metaphysical_mishap) 
+                  else str(metaphysical_mishap))
+            print(f"DEBUG: Oracle's existential crisis: {metaphysical_mishap}")
             GLib.idle_add(
                 self.set_ollama_status,
                 "Error",
                 0,
                 msg
             )
-    
-    def on_whisper_reload(self, button):
-        """Handle Whisper reload button click"""
+
+    def on_whisper_encore(self, button):
+        """When Whisper needs a second take"""
         if self.verification_in_progress:
             return
             
         button.set_sensitive(False)
         
-        # Clean up existing server
+        # Escort our current performer offstage
         if self.whisper_server_process:
             try:
                 self.whisper_server_process.terminate()
@@ -592,38 +780,20 @@ class ModelManager(Gtk.ApplicationWindow):
                 self.whisper_server_process.kill()
             self.whisper_server_process = None
         
-        # Kill any stray processes
-        if is_port_in_use(5000):
-            kill_process_on_port(5000)
-            time.sleep(1)  # Give it time to clean up
+        # Make sure their understudy isn't hiding in the wings
+        if is_stage_door_locked(5000):
+            escort_squatter_from_port(5000)
+            time.sleep(1)  # Dramatic pause
         
-        # Reset status and start fresh
+        # Reset for the encore
         self.whisper_status = "Starting"
         self.whisper_progress = 0
         self.update_status_displays()
-        self.start_whisper_server()
-        button.set_sensitive(True)
-    
-    def on_ollama_reload(self, button):
-        """Handle Ollama reload button click"""
-        if self.verification_in_progress:
-            return
-            
-        button.set_sensitive(False)
-        
-        # Clean up existing server
-        if is_port_in_use(11434):
-            kill_process_on_port(11434)
-            time.sleep(1)
-        
-        self.ollama_status = "Starting"
-        self.ollama_progress = 0
-        self.update_status_displays()
-        self.start_ollama_server()
+        self.summon_whisper_oracle()
         button.set_sensitive(True)
     
     def set_whisper_status(self, status, progress, message=""):
-        """Update Whisper status display"""
+        """Update Whisper's status board"""
         self.whisper_status = status
         self.whisper_progress = progress
         self.whisper_progress_bar.set_fraction(progress / 100)
@@ -631,8 +801,8 @@ class ModelManager(Gtk.ApplicationWindow):
         self.update_status_displays()
     
     def set_ollama_status(self, status, progress=0, message=""):
-        """Update Ollama status display"""
-        print(f"DEBUG: Setting Ollama status - Status: {status}, Progress: {progress}, Message: {message}")
+        """Update the Oracle's prophecy board"""
+        print(f"DEBUG: Oracle speaks - Status: {status}, Progress: {progress}, Message: {message}")
         self.ollama_status = status
         self.ollama_progress = progress
         self.ollama_progress_bar.set_fraction(progress / 100)
@@ -640,135 +810,155 @@ class ModelManager(Gtk.ApplicationWindow):
         self.update_status_displays()
         
     def update_status_displays(self):
-        """Update status indicators"""
-        def update_indicator(indicator, status):
-            indicator.remove_css_class('status-running')
-            indicator.remove_css_class('status-error')
-            indicator.remove_css_class('status-loading')
+        """Refresh all our status lights"""
+        def update_performer_spotlight(spotlight, status):
+            # Reset all moods
+            spotlight.remove_css_class('status-running')
+            spotlight.remove_css_class('status-error')
+            spotlight.remove_css_class('status-loading')
             
+            # Set the appropriate mood lighting
             if status == "Running":
-                indicator.add_css_class('status-running')
+                spotlight.add_css_class('status-running')
             elif status == "Error":
-                indicator.add_css_class('status-error')
+                spotlight.add_css_class('status-error')
             else:
-                indicator.add_css_class('status-loading')
+                spotlight.add_css_class('status-loading')
         
-        update_indicator(self.whisper_indicator, self.whisper_status)
-        update_indicator(self.ollama_indicator, self.ollama_status)
+        update_performer_spotlight(self.whisper_indicator, self.whisper_status)
+        update_performer_spotlight(self.ollama_indicator, self.ollama_status)
     
     def update_gpu_status(self):
-        """Update GPU status display"""
+        """Check the power consumption of our performance"""
         try:
             import pynvml
             pynvml.nvmlInit()
-            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            backstage_power = pynvml.nvmlDeviceGetHandleByIndex(0)
             
-            # Get memory info
-            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
-            mem_used_gb = mem.used / 1024**3
-            mem_total_gb = mem.total / 1024**3
+            # Check the power meter
+            power_reading = pynvml.nvmlDeviceGetMemoryInfo(backstage_power)
+            watts_used = power_reading.used / 1024**3
+            total_capacity = power_reading.total / 1024**3
             
-            # Get temperature
-            temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+            # Check if we're overheating
+            temperature = pynvml.nvmlDeviceGetTemperature(
+                backstage_power, 
+                pynvml.NVML_TEMPERATURE_GPU
+            )
             
             self.gpu_info.set_text(
-                f"GPU Memory: {mem_used_gb:.1f}GB/{mem_total_gb:.1f}GB | Temp: {temp}°C"
+                f"Power Draw: {watts_used:.1f}GB/{total_capacity:.1f}GB | Temp: {temperature}°C"
             )
         except Exception:
-            self.gpu_info.set_text("GPU: Not Available")
+            self.gpu_info.set_text("Power Meter: Unplugged")
         
         return True
     
     def cleanup(self):
-        """Clean up resources - Whisper only"""
+        """Time to lower the final curtain"""
         if self.whisper_server_process:
             try:
                 self.whisper_server_process.terminate()
                 self.whisper_server_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.whisper_server_process.kill()
-            except Exception as e:
-                print(f"Error cleaning up Whisper server: {e}")
+            except Exception as farewell_mishap:
+                print(f"Whisper's awkward exit: {farewell_mishap}")
         
-        # Clean up Whisper port only
-        if is_port_in_use(5000):
+        # Make sure Whisper really left the building
+        if is_stage_door_locked(5000):
             try:
-                kill_process_on_port(5000)
-            except Exception as e:
-                print(f"Error cleaning up Whisper port: {e}")
+                escort_squatter_from_port(5000)
+            except Exception as lingering_presence:
+                print(f"Had to escort Whisper out: {lingering_presence}")
+
 
 class ModelManagerApplication(Adw.Application):
+    """The Theater Management Company"""
     def __init__(self):
         super().__init__(application_id='com.system.magi.models')
     
     def do_activate(self):
-        """Create and show the main window"""
-        win = ModelManager(self)
-        win.present()
+        """Open the theater for today's performance"""
+        theater = ModelManager(self)
+        theater.present()
         
-        # Position at top right of screen
-        display = win.get_display()
-        monitor = display.get_monitors()[0]
-        geometry = monitor.get_geometry()
+        # Position our theater in the skyline
+        cityscape = theater.get_display()
+        district = cityscape.get_monitors()[0]
+        plot_of_land = district.get_geometry()
         
-        win_width, win_height = win.get_default_size()
-        # Calculate x to align with right edge, leaving a small gap
-        x = geometry.x + geometry.width - win_width - 10
-        # Calculate y to align with top edge, leaving a small gap
-        y = geometry.y + 10
+        theater_width, theater_height = theater.get_default_size()
+        # Find a nice spot near the top right
+        x_position = plot_of_land.x + plot_of_land.width - theater_width - 10
+        y_position = plot_of_land.y + 10
         
-        def set_window_properties():
+        def establish_theater_presence():
             try:
-                # Get window ID
-                output = subprocess.check_output(['xdotool', 'search', '--name', '^MAGI Model Status$']).decode().strip()
-                if output:
-                    window_id = output.split('\n')[0]
+                # Get our theater's ID
+                marquee = subprocess.check_output(
+                    ['xdotool', 'search', '--name', '^MAGI Model Status$']
+                ).decode().strip()
+                if marquee:
+                    theater_id = marquee.split('\n')[0]
                     
-                    # Make window visible on all workspaces with -1
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-t', '-1'], check=True)
+                    # Make sure we're visible from every street
+                    subprocess.run(['wmctrl', '-i', '-r', theater_id, '-t', '-1'], check=True)
                     
-                    # Set window to stay below others and make it sticky (appears on all workspaces)
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,below,sticky'], check=True)
+                    # Keep us modest but noticeable
+                    subprocess.run(
+                        ['wmctrl', '-i', '-r', theater_id, '-b', 'add,below,sticky'], 
+                        check=True
+                    )
                     
-                    # Move window to top right
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-e', f'0,{x},{y},-1,-1'], check=True)
+                    # Move to our prime location
+                    subprocess.run(
+                        ['wmctrl', '-i', '-r', theater_id, '-e', 
+                         f'0,{x_position},{y_position},-1,-1'], 
+                        check=True
+                    )
                     
-                    # Additional command to ensure it's on all workspaces
-                    subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,sticky'], check=True)
-            except Exception as e:
-                print(f"Failed to set window properties: {e}")
-                # Retry after a short delay if it fails
-                GLib.timeout_add(500, set_window_properties)
+                    # One more check for visibility
+                    subprocess.run(
+                        ['wmctrl', '-i', '-r', theater_id, '-b', 'add,sticky'], 
+                        check=True
+                    )
+            except Exception as zoning_violation:
+                print(f"Theater placement issues: {zoning_violation}")
+                # Try again after the dust settles
+                GLib.timeout_add(500, establish_theater_presence)
                 return False
             return False
         
-        # Give the window time to appear before setting properties
-        GLib.timeout_add(100, set_window_properties)
+        # Give the city time to notice us
+        GLib.timeout_add(100, establish_theater_presence)
+
 
 def main():
-    """Main entry point"""
+    """The Show Must Go On"""
     import signal
     
-    app = ModelManagerApplication()
+    theatrical_company = ModelManagerApplication()
     
-    def cleanup(signum=None, frame=None):
-        """Clean up resources on exit"""
-        print("\nCleaning up...")
-        for window in app.get_windows():
-            if isinstance(window, ModelManager):
-                window.cleanup()
+    def closing_time(signum=None, frame=None):
+        """Time to send everyone home"""
+        print("\nLowering the curtain...")
+        for theater in theatrical_company.get_windows():
+            if isinstance(theater, ModelManager):
+                theater.cleanup()
                 break
-        app.quit()
+        theatrical_company.quit()
     
-    signal.signal(signal.SIGINT, cleanup)
-    signal.signal(signal.SIGTERM, cleanup)
+    # Handle the critics gracefully
+    signal.signal(signal.SIGINT, closing_time)
+    signal.signal(signal.SIGTERM, closing_time)
     
     try:
-        exit_code = app.run(None)
-        cleanup()
-        return exit_code
-    except Exception as e:
-        print(f"Fatal error: {e}")
+        final_review = theatrical_company.run(None)
+        closing_time()
+        return final_review
+    except Exception as catastrophic_failure:
+        print(f"The theater is on fire: {catastrophic_failure}")
         return 1
 
 if __name__ == "__main__":
