@@ -80,14 +80,81 @@ apt-get install -y \
     ffmpeg
     
     
+pip3 install --no-deps \
+    sounddevice==0.5.1 \
+    pynvml==12.0.0 \
+    psutil==5.9.4 \
+    TTS==0.22.0 \
+    torch==2.5.1 \
+    torchaudio==2.5.1 \
+    numpy==1.24.3 || exit 1
 
-# Install system-wide pip packages needed for core functionality
-pip3 install --break-system-packages \
-    sounddevice \
-    pynvml \
-    psutil \
-    TTS\
-    torch\
+# Now resolve dependencies
+pip3 install --upgrade \
+    sounddevice==0.5.1 \
+    pynvml==12.0.0 \
+    psutil==5.9.4 \
+    TTS==0.22.0 \
+    torch==2.5.1 \
+    torchaudio==2.5.1
+
+perform_the_great_pip_waltz() {
+    # Our leading performers in this dependency dance
+    local primary_performers=(
+        "sounddevice==0.5.1"
+        "pynvml==12.0.0" 
+        "psutil==5.9.4"
+        "TTS==0.22.0"
+    )
+
+    # The torch ensemble - they must perform together
+    local torch_ensemble=(
+        "torch==2.5.1"
+        "torchaudio==2.5.1"
+        "numpy==1.24.3"  # Torch's favorite dance partner
+    )
+
+    # First Act: Setting the Stage
+    echo "🎭 Act I: Preparing the Pip Stage..."
+    python3 -m pip install --upgrade pip setuptools wheel
+
+    # Second Act: The Base Package Waltz
+    echo "🎭 Act II: The Primary Package Waltz..."
+    for performer in "${primary_performers[@]}"; do
+        echo "🎪 Inviting performer: $performer to the stage..."
+        python3 -m pip install --no-deps "$performer" || {
+            echo "💔 Alas! $performer had stage fright!"
+            return 1
+        }
+    done
+
+    # Third Act: The Torch Ensemble's Grand Performance
+    echo "🎭 Act III: The Torch Ensemble's Performance..."
+    for torch_artist in "${torch_ensemble[@]}"; do
+        echo "🔥 Torch performer: $torch_artist taking the stage..."
+        python3 -m pip install --no-deps "$torch_artist" || {
+            echo "🌧️ The torch has been extinguished!"
+            return 1
+        }
+    done
+
+    # Final Act: Dependency Resolution Ballet
+    echo "🎭 Final Act: The Dependency Resolution Ballet..."
+    python3 -m pip install --upgrade --no-deps -r <(
+        pip freeze | grep -v "torch\|torchaudio\|numpy\|sounddevice\|pynvml\|psutil\|TTS"
+    )
+
+    echo "🎬 The installation performance has concluded!"
+    return 0
+}
+
+# Let the show begin!
+if perform_the_great_pip_waltz; then
+    echo "👏 Standing ovation! All packages installed successfully!"
+else
+    echo "😱 Oh no! The show must not go on... Something went wrong!"
+    exit 1
+fi
     
 
 # 🎭 The Grand Voice Model Summoning Ceremony 🎭
