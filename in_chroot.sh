@@ -23,6 +23,7 @@ apt-get install -y \
     dbus-x11 \
     curl \
     wget \
+    espeak \
     gnupg \
     ca-certificates \
     mate-desktop-environment \
@@ -69,6 +70,9 @@ apt-get install -y \
     python3-prctl \
     python3-watchdog \
     python3-soundfile \
+    python3-torch \
+    python3-psutil \
+    python3-pynvml \
     gir1.2-gtk-4.0 \
     libadwaita-1-0 \
     gir1.2-adw-1 \
@@ -80,82 +84,10 @@ apt-get install -y \
     ffmpeg
     
     
-pip3 install --no-deps \
-    sounddevice==0.5.1 \
-    pynvml==12.0.0 \
-    psutil==5.9.4 \
-    TTS==0.22.0 \
-    torch==2.5.1 \
-    torchaudio==2.5.1 \
-    numpy==1.24.3 || exit 1
+pip3 install --break-system-packages \
+    sounddevice \
+    TTS\
 
-# Now resolve dependencies
-pip3 install --upgrade \
-    sounddevice==0.5.1 \
-    pynvml==12.0.0 \
-    psutil==5.9.4 \
-    TTS==0.22.0 \
-    torch==2.5.1 \
-    torchaudio==2.5.1
-
-perform_the_great_pip_waltz() {
-    # Our leading performers in this dependency dance
-    local primary_performers=(
-        "sounddevice==0.5.1"
-        "pynvml==12.0.0" 
-        "psutil==5.9.4"
-        "TTS==0.22.0"
-    )
-
-    # The torch ensemble - they must perform together
-    local torch_ensemble=(
-        "torch==2.5.1"
-        "torchaudio==2.5.1"
-        "numpy==1.24.3"  # Torch's favorite dance partner
-    )
-
-    # First Act: Setting the Stage
-    echo "🎭 Act I: Preparing the Pip Stage..."
-    python3 -m pip install --upgrade pip setuptools wheel
-
-    # Second Act: The Base Package Waltz
-    echo "🎭 Act II: The Primary Package Waltz..."
-    for performer in "${primary_performers[@]}"; do
-        echo "🎪 Inviting performer: $performer to the stage..."
-        python3 -m pip install --no-deps "$performer" || {
-            echo "💔 Alas! $performer had stage fright!"
-            return 1
-        }
-    done
-
-    # Third Act: The Torch Ensemble's Grand Performance
-    echo "🎭 Act III: The Torch Ensemble's Performance..."
-    for torch_artist in "${torch_ensemble[@]}"; do
-        echo "🔥 Torch performer: $torch_artist taking the stage..."
-        python3 -m pip install --no-deps "$torch_artist" || {
-            echo "🌧️ The torch has been extinguished!"
-            return 1
-        }
-    done
-
-    # Final Act: Dependency Resolution Ballet
-    echo "🎭 Final Act: The Dependency Resolution Ballet..."
-    python3 -m pip install --upgrade --no-deps -r <(
-        pip freeze | grep -v "torch\|torchaudio\|numpy\|sounddevice\|pynvml\|psutil\|TTS"
-    )
-
-    echo "🎬 The installation performance has concluded!"
-    return 0
-}
-
-# Let the show begin!
-if perform_the_great_pip_waltz; then
-    echo "👏 Standing ovation! All packages installed successfully!"
-else
-    echo "😱 Oh no! The show must not go on... Something went wrong!"
-    exit 1
-fi
-    
 
 # 🎭 The Grand Voice Model Summoning Ceremony 🎭
 cat > /opt/magi/summon_the_voice.py << 'DRAMATIC_FINALE'
@@ -233,7 +165,7 @@ chmod -R 755 /opt/magi/voice_models
 # Taking a bow
 echo "🎭 The voice model installation has concluded! *bows gracefully* 🎭"
 # The Great Espeak Masquerade
-if ln -s /opt/magi/magi_espeak.py /usr/bin/espeak; then
+if ln -s /opt/magi/magi_espeak.py /usr/bin/magi_espeak; then
     echo "🎭 Behold! Our python script is now masterfully disguised as espeak!"
 else
     echo "😱 Alas! Our cunning plan of impersonation has been foiled!"

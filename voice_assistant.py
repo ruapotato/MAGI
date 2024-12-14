@@ -84,7 +84,7 @@ class EchoesInTheVoid:
         threading.Thread(
             target=lambda: self._vocal_enchantment.acquire()
             and subprocess.run(
-                ['espeak', '-s', '150', '-p', '50', '-a', '200', prophecy],
+                ['magi_espeak', prophecy],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )

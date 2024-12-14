@@ -118,7 +118,7 @@ class MessageBox(Gtk.Box):
     
     def on_read_clicked(self, button):
         text = self.label.get_text()
-        threading.Thread(target=lambda: os.system(f'espeak "{text}"')).start()
+        threading.Thread(target=lambda: os.system(f'magi_espeak "{text}"')).start()
     
     def on_copy_clicked(self, button):
         text = self.label.get_text()
@@ -451,7 +451,7 @@ class MainWindow(Adw.ApplicationWindow):
             print("Recording too short")
             if not hasattr(self, '_speaking'):
                 self._speaking = True
-                subprocess.run(['espeak', "Press and hold to record audio"])
+                subprocess.run(['magi_espeak', "Press and hold to record audio"])
                 GLib.timeout_add(2000, self._reset_speaking_state)
             return
         

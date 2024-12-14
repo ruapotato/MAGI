@@ -538,7 +538,7 @@ class VoiceInputButton(Gtk.Button):
             print("Recording too short")
             if not hasattr(self, '_speaking'):
                 self._speaking = True
-                subprocess.run(['espeak', "Press and hold to record audio"])
+                subprocess.run(['magi_espeak', "Press and hold to record audio"])
                 GLib.timeout_add(2000, self._reset_speaking_state)
             return
         
@@ -904,7 +904,7 @@ class MAGIPanel(Gtk.ApplicationWindow):
         try:
             text = clipboard.read_text_finish(result)
             if text:
-                subprocess.Popen(['espeak', text])
+                subprocess.Popen(['magi_espeak', text])
         except Exception as e:
             print(f"TTS Error: {e}")
     
