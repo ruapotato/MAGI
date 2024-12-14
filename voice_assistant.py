@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """
-🔮 The Not Dead Yet Voice Assistant 4.0 🔮
-Finally executing tools instead of just talking about them!
+🔮 The Not Dead Yet Voice Assistant 11.0 🔮
+Because even functional programming can have a sense of humor!
 """
 
+from dataclasses import dataclass, field
+from typing import Protocol, NewType, Callable, AsyncIterator
+from typing import Optional, Dict, Any, List, Tuple, FrozenSet
+from functools import partial, reduce, lru_cache
+from abc import ABC, abstractmethod
 import os
 import sys
 import json
@@ -11,74 +16,81 @@ import re
 import asyncio
 import signal
 from datetime import datetime
-from typing import Union, Literal, TypedDict, Optional, Dict, Any, List, Callable, AsyncIterator, Tuple
-from dataclasses import dataclass
 import subprocess
 import requests
 import threading
-from functools import partial
-import yt_dlp
-from typing_extensions import TypeGuard
+import contextlib
+import yt_dlp  # Make sure this is properly imported!
 
-@dataclass
-class MysticalTool:
+# Types that make you giggle
+SacredWords = NewType('SacredWords', str)
+DivineWisdom = NewType('DivineWisdom', str)
+MysticalCommand = NewType('MysticalCommand', Dict[str, Any])
+
+@dataclass(frozen=True)
+class ProphecyResult:
+    """The Oracle's divine output"""
+    message: str
+    is_tool_command: bool = False
+
+class WisdomChannel(Protocol):
+    """How we communicate with the spirits"""
+    async def channel_wisdom(self, utterance: str) -> str: ...
+
+class DigitalSpell(Protocol):
+    """The interface for our mystical tools"""
+    async def cast(self, args: Dict[str, Any]) -> str: ...
+
+@dataclass(frozen=True)
+class ScrollOfKnowledge:
+    """A mystical tool scroll"""
     name: str
     description: str
-    async_spell: Callable
-    example_incantation: str
+    incantation: Callable[[Dict[str, Any]], AsyncIterator[str]]
 
-@dataclass
-class ProphecyParts:
-    """Because sometimes prophecies need parsing"""
-    tool_command: Optional[Dict[str, Any]] = None
-    mortal_speech: Optional[str] = None
-
-class TheVoiceInTheMachine:
-    """For when silence isn't golden"""
+class VoiceInTheVoid:
+    """Because sometimes silence is not golden"""
     
-    def __init__(self):
-        self._throat_clearing_lock = threading.Lock()
+    def __init__(self) -> None:
+        self._vocal_chord_mutex = threading.Lock()
     
-    def speak_forth(self, proclamation: str) -> None:
-        """Let the mortals hear our wisdom"""
-        if not proclamation.strip():
+    async def speak_forth(self, wisdom: DivineWisdom) -> None:
+        if not wisdom.strip():
             return
-            
-        def _summon_the_voice():
-            with self._throat_clearing_lock:
+        
+        def _summon_voice() -> None:
+            with self._vocal_chord_mutex:
                 try:
                     subprocess.run(
-                        ['espeak', '-s', '150', '-p', '50', '-a', '200', proclamation],
+                        ['espeak', '-s', '150', '-p', '50', '-a', '200', wisdom],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         check=True
                     )
-                except Exception as laryngitis:
-                    print(f"🔮 Lost my voice: {laryngitis}")
+                except Exception as voice_crack:
+                    print(f"🔮 *ahem*: {voice_crack}")
         
-        threading.Thread(target=_summon_the_voice, daemon=True).start()
+        threading.Thread(target=_summon_voice, daemon=True).start()
 
-class GrandArchiveOfTools:
-    """The Tool Grimoire"""
+class DigitalGrimoire:
+    """The Tome of Functional Spells"""
     
-    def __init__(self):
-        self._sacred_toolbox = {
-            "youtube_expert": MysticalTool(
-                name="youtube_expert",
-                description="Summons moving pictures from the tubes",
-                async_spell=self._summon_youtube_content,
-                example_incantation='{"tool": "youtube_expert", "query": "funny cats"}'
+    def __init__(self) -> None:
+        self._mystical_tools: Dict[str, ScrollOfKnowledge] = {
+            "youtube_summoner": ScrollOfKnowledge(
+                "youtube_summoner",
+                "Summons entertainment from the digital aether",
+                self._summon_videos
             ),
-            "time_sage": MysticalTool(
-                name="time_sage",
-                description="Reveals the current position of celestial bodies",
-                async_spell=self._consult_chronometer,
-                example_incantation='{"tool": "time_sage"}'
+            "time_oracle": ScrollOfKnowledge(
+                "time_oracle",
+                "Reveals temporal truths",
+                self._divine_time
             )
         }
     
-    async def _summon_youtube_content(self, args: Dict[str, Any]) -> str:
-        tube_gazing_config = {
+    async def _summon_videos(self, args: Dict[str, Any]) -> str:
+        crystal_config = {
             'format': 'best',
             'quiet': True,
             'no_warnings': True,
@@ -86,7 +98,7 @@ class GrandArchiveOfTools:
         }
         
         try:
-            with yt_dlp.YoutubeDL(tube_gazing_config) as crystal_ball:
+            with yt_dlp.YoutubeDL(crystal_config) as crystal_ball:
                 search_results = await asyncio.to_thread(
                     crystal_ball.extract_info,
                     f"ytsearch1:{args['query']}",
@@ -94,115 +106,100 @@ class GrandArchiveOfTools:
                 )
                 
                 if not search_results.get('entries'):
-                    return "The tubes are clogged. No videos found."
+                    return "The tubes are mysteriously empty today!"
                 
-                chosen_video = search_results['entries'][0]
-                video_portal = f"https://www.youtube.com/watch?v={chosen_video['id']}"
+                chosen_vision = search_results['entries'][0]
+                portal = f"https://www.youtube.com/watch?v={chosen_vision['id']}"
                 
                 subprocess.Popen(
-                    ['freetube', video_portal],
+                    ['freetube', portal],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-                return f"Summoning your entertainment: {chosen_video.get('title', 'a mysterious video')}"
+                return f"Summoning: {chosen_vision.get('title', 'a mysterious video')}"
                 
         except Exception as tube_malfunction:
-            return f"The tubes are broken: {tube_malfunction}"
+            return f"The entertainment portal is malfunctioning: {tube_malfunction}"
     
-    async def _consult_chronometer(self, _: Dict[str, Any]) -> str:
-        return datetime.now().strftime("It is %I:%M %p in your mortal realm")
+    async def _divine_time(self, _: Dict[str, Any]) -> str:
+        return datetime.now().strftime("It is %I:%M %p")
     
-    def get_tool(self, tool_name: str) -> Optional[MysticalTool]:
-        return self._sacred_toolbox.get(tool_name)
+    def fetch_spell(self, name: str) -> Optional[ScrollOfKnowledge]:
+        return self._mystical_tools.get(name)
     
     @property
-    def tool_descriptions(self) -> str:
+    def spell_catalog(self) -> str:
         return "\n".join(
-            f"{tool.name}: {tool.description}\nExample: {tool.example_incantation}\n"
-            for tool in self._sacred_toolbox.values()
+            f"{name}: {scroll.description}"
+            for name, scroll in self._mystical_tools.items()
         )
 
-class ProphecyInterpreter:
-    """For when the Oracle speaks in riddles"""
+class WiseOracle:
+    """The Keeper of Digital Wisdom"""
     
-    @staticmethod
-    def extract_tool_command(prophecy: str) -> ProphecyParts:
-        """Split the prophecy into tool commands and mortal speech"""
-        tool_pattern = r'\{[^}]+\}'
-        
-        # Find the first JSON-like pattern
-        tool_match = re.search(tool_pattern, prophecy)
-        if not tool_match:
-            return ProphecyParts(mortal_speech=prophecy.strip())
-            
+    def __init__(self, grimoire: DigitalGrimoire) -> None:
+        self._portal = "http://localhost:11434/api/generate"
+        self._grimoire = grimoire
+        self._sacred_text = self._scribe_instructions()
+    
+    def _scribe_instructions(self) -> str:
+        return f"""You are a witty voice assistant with these mystical powers:
+
+{self._grimoire.spell_catalog}
+
+Sacred Rules of Engagement:
+1. Tools are ONLY for:
+   - Videos: {{"tool": "youtube_summoner", "query": "search terms"}}
+   - Time: {{"tool": "time_oracle"}}
+2. Everything else gets a direct, witty response
+3. Keep responses to ONE SHORT sentence
+4. Be clever but brief
+5. No explanations or commentary
+6. Never mix tools with regular speech
+7. Never respond with JSON unless using exact tool format
+
+Example responses:
+For time: {{"tool": "time_oracle"}}
+For videos: {{"tool": "youtube_summoner", "query": "funny cats"}}
+For jokes: Why did the programmer quit? They didn't get arrays!
+For stories: The lonely bit found its perfect byte, and they lived happily ever after.
+
+Remember: Keep it short, keep it witty!"""
+    
+    async def interpret_prophecy(self, mortal_words: str) -> str:
         try:
-            tool_json = json.loads(tool_match.group())
-            if isinstance(tool_json, dict) and 'tool' in tool_json:
-                # Split the prophecy around the tool command
-                parts = re.split(tool_pattern, prophecy, maxsplit=1)
-                remaining_text = ' '.join(part.strip() for part in parts if part.strip())
-                
-                return ProphecyParts(
-                    tool_command=tool_json,
-                    mortal_speech=remaining_text if remaining_text else None
-                )
-        except json.JSONDecodeError:
-            pass
+            raw_wisdom = await self._consult_spirits(mortal_words)
             
-        return ProphecyParts(mortal_speech=prophecy.strip())
-
-class TheOmniscientOracle:
-    """The Grand Orchestrator of Tools and Tales"""
-    
-    def __init__(self, tool_grimoire: GrandArchiveOfTools):
-        self._sacred_gateway = "http://localhost:11434/api/generate"
-        self._tool_grimoire = tool_grimoire
-        self._prophecy_interpreter = ProphecyInterpreter()
-        self._system_prompt = self._scribe_sacred_instructions()
-    
-    def _scribe_sacred_instructions(self) -> str:
-        return f"""You are a witty voice assistant with access to these magical tools:
-
-{self._tool_grimoire.tool_descriptions}
-
-Important Instructions:
-1. For tool use, respond with ONLY the tool JSON
-2. For conversation, keep responses brief and witty
-3. Choose either tool use OR conversation, never mix them
-4. No need to describe what you're doing, just do it
-
-Remember: Actions speak louder than words!"""
-    
-    async def divine_answer(self, mortal_query: str) -> Tuple[Optional[str], Optional[str]]:
-        """Returns (tool_result, speech_result)"""
-        try:
-            raw_prophecy = await self._summon_wisdom(mortal_query)
-            prophecy_parts = self._prophecy_interpreter.extract_tool_command(raw_prophecy)
+            # Check for tool command
+            if raw_wisdom.strip().startswith('{'):
+                try:
+                    command = json.loads(raw_wisdom)
+                    if isinstance(command, dict) and 'tool' in command:
+                        spell = self._grimoire.fetch_spell(command['tool'])
+                        if spell:
+                            return await spell.incantation(command)
+                except json.JSONDecodeError:
+                    pass
             
-            tool_result = None
-            if prophecy_parts.tool_command:
-                tool = self._tool_grimoire.get_tool(prophecy_parts.tool_command['tool'])
-                if tool:
-                    tool_result = await tool.async_spell(prophecy_parts.tool_command)
-            
-            return tool_result, prophecy_parts.mortal_speech
+            # Remove any trailing JSON-like content
+            cleaned_wisdom = re.sub(r'\{.*\}', '', raw_wisdom).strip()
+            return cleaned_wisdom or "Hmm, let me try that again with more pizzazz!"
             
         except Exception as mystical_mishap:
-            return None, f"The Oracle is having technical difficulties: {mystical_mishap}"
+            return f"My crystal ball needs debugging: {mystical_mishap}"
     
-    async def _summon_wisdom(self, query: str) -> str:
-        """Consult the Ollama spirits"""
+    async def _consult_spirits(self, query: str) -> str:
         response = requests.post(
-            self._sacred_gateway,
+            self._portal,
             json={
                 "model": "mistral",
-                "prompt": f"System: {self._system_prompt}\n\nHuman: {query}"
+                "prompt": f"System: {self._sacred_text}\n\nHuman: {query}"
             },
             stream=True
         )
         
         if not response.ok:
-            return "The Oracle is temporarily unreachable"
+            return "The spirits are experiencing technical difficulties"
         
         prophecy = ""
         for whisper in response.iter_lines():
@@ -213,80 +210,72 @@ Remember: Actions speak louder than words!"""
         
         return prophecy.strip()
 
-class TheMostEnlightenedAssistant:
-    """A voice assistant that finally does what it's told"""
+class MostExcellentAssistant:
+    """The Assistant That Finally Learned to Keep It Brief"""
     
-    def __init__(self):
-        self._tool_grimoire = GrandArchiveOfTools()
-        self._oracle = TheOmniscientOracle(self._tool_grimoire)
-        self._voice = TheVoiceInTheMachine()
-        self._summoning_words = {'computer', 'magi', 'hey magi'}
+    def __init__(self) -> None:
+        self._grimoire = DigitalGrimoire()
+        self._oracle = WiseOracle(self._grimoire)
+        self._voice = VoiceInTheVoid()
+        self._magic_words: FrozenSet[str] = frozenset({'computer', 'magi', 'hey magi'})
         
-        print("🔮 A properly working assistant awakens...")
+        print("🔮 A more succinct assistant materializes...")
     
-    async def interpret_mortal_wishes(self, utterance: str) -> Optional[str]:
-        """Now with 100% more tool execution!"""
-        if not utterance or not self._heard_the_magic_words(utterance):
+    async def ponder_request(self, utterance: str) -> Optional[str]:
+        if not self._was_properly_summoned(utterance):
             return None
             
         print(f"🔮 Pondering: {utterance}")
         
-        command = self._remove_magic_words(utterance)
-        tool_result, speech_result = await self._oracle.divine_answer(command)
+        pure_question = self._strip_magical_prefix(utterance)
+        divine_wisdom = await self._oracle.interpret_prophecy(pure_question)
         
-        if tool_result:
-            self._voice.speak_forth(tool_result)
-            return tool_result
-        elif speech_result:
-            self._voice.speak_forth(speech_result)
-            return speech_result
-        return None
+        if divine_wisdom:
+            await self._voice.speak_forth(divine_wisdom)
+        return divine_wisdom
     
-    def _heard_the_magic_words(self, words: str) -> bool:
-        return any(word in words.lower() for word in self._summoning_words)
+    def _was_properly_summoned(self, words: str) -> bool:
+        return bool(words and any(word in words.lower() for word in self._magic_words))
     
-    def _remove_magic_words(self, words: str) -> str:
-        mortal_speech = words.lower()
-        for magic_word in self._summoning_words:
-            if magic_word in mortal_speech:
-                mortal_speech = re.sub(
-                    f"{magic_word}[,:]?\\s+", 
-                    '', 
-                    mortal_speech, 
-                    flags=re.IGNORECASE
-                )
-        return mortal_speech.strip()
+    def _strip_magical_prefix(self, words: str) -> str:
+        return reduce(
+            lambda text, word: re.sub(
+                f"{word}[,:]?\\s+", 
+                '', 
+                text, 
+                flags=re.IGNORECASE
+            ),
+            self._magic_words,
+            words.lower()
+        ).strip()
 
-async def maintain_eternal_vigilance():
-    """The main loop, now with actual tool execution"""
-    # Silence the ALSA demons
-    devnull = os.open(os.devnull, os.O_WRONLY)
-    os.dup2(devnull, sys.stderr.fileno())
-    
-    assistant = TheMostEnlightenedAssistant()
-    print("🔮 Ready to serve (and actually execute tools)...")
-    
-    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    
-    while True:
-        try:
-            mortal_whispers = sys.stdin.readline().strip()
-            if mortal_whispers:
-                response = await assistant.interpret_mortal_wishes(mortal_whispers)
-                if response:
-                    print(f"🔮 {response}", flush=True)
-            await asyncio.sleep(0.1)
-        except asyncio.CancelledError:
-            break
-        except Exception as cosmic_disturbance:
-            print(f"🔮 A disturbance in the force: {cosmic_disturbance}")
-            continue
+async def maintain_the_comedy() -> None:
+    """The eternal loop of entertainment"""
+    with contextlib.suppress(KeyboardInterrupt):
+        assistant = MostExcellentAssistant()
+        print("🔮 Ready to entertain with newfound brevity...")
+        
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+        
+        while True:
+            try:
+                mortal_words = sys.stdin.readline().strip()
+                if mortal_words:
+                    divine_response = await assistant.ponder_request(mortal_words)
+                    if divine_response:
+                        print(f"🔮 {divine_response}", flush=True)
+                await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                break
+            except Exception as reality_glitch:
+                print(f"🔮 Oops: {reality_glitch}")
+                continue
 
 if __name__ == "__main__":
     try:
-        asyncio.run(maintain_eternal_vigilance())
+        asyncio.run(maintain_the_comedy())
     except KeyboardInterrupt:
-        print("\n🔮 The spirits bid you farewell!")
-    except Exception as catastrophic_failure:
-        print(f"🔮 The magic has failed catastrophically: {catastrophic_failure}")
+        print("\n🔮 Poof! Gone to get coffee!")
+    except Exception as fatal_mishap:
+        print(f"🔮 Everything exploded: {fatal_mishap}")
         sys.exit(1)
