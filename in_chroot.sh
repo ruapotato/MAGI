@@ -66,6 +66,9 @@ apt-get install -y \
     python3-requests \
     python3-gi \
     python3-gi-cairo \
+    python3-prctl \
+    python3-watchdog \
+    python3-soundfile \
     gir1.2-gtk-4.0 \
     libadwaita-1-0 \
     gir1.2-adw-1 \
@@ -85,10 +88,6 @@ pip3 install --break-system-packages \
     psutil \
     TTS\
     torch\
-    sounddevice\
-    soundfile\
-    watchdog\
-    prctl
     
 
 # 🎭 The Grand Voice Model Summoning Ceremony 🎭
