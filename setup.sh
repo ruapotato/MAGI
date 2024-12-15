@@ -78,7 +78,6 @@ if [ ! -d "$VENV_DIR" ]; then
     pip install numpy scipy torch torchaudio
     pip install "transformers<4.30.0" "tokenizers<0.14.0"
     pip install librosa scikit-learn inflect
-    pip install "TTS==0.21.1"
     # Core processing libraries
     pip install einops encodec flask pandas matplotlib
 
