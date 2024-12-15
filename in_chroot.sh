@@ -83,12 +83,6 @@ apt-get install -y \
     libsndfile1 \
     ffmpeg
     
-    
-pip3 install --break-system-packages \
-    sounddevice \
-    TTS\
-
-
 # 🎭 The Grand Voice Model Summoning Ceremony 🎭
 cat > /opt/magi/summon_the_voice.py << 'DRAMATIC_FINALE'
 #!/usr/bin/env python3
@@ -359,7 +353,8 @@ pip install --no-cache-dir --timeout 100 --retries 3 \
     sounddevice \
     requests \
     nvidia-ml-py \
-    psutil
+    psutil \
+    sounddevice
 
 pip install --no-cache-dir --timeout 300 --retries 3 \
     torch \
