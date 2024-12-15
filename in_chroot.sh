@@ -83,90 +83,7 @@ apt-get install -y \
     libsndfile1 \
     ffmpeg
     
-# 🎭 The Grand Voice Model Summoning Ceremony 🎭
-cat > /opt/magi/summon_the_voice.py << 'DRAMATIC_FINALE'
-#!/usr/bin/env python3
-from dataclasses import dataclass
-from pathlib import Path
-import sys
-from typing import Optional, Tuple, Literal
-import torch
-from TTS.api import TTS
 
-VocalPerformers = Literal[
-    "p226",  # The Mysterious Baritone
-    "p326",  # The Dramatic Bass
-    "p330",  # The Smooth Operator
-    "p347"   # The Gentle Giant
-]
-
-@dataclass
-class TheatricalVoiceSummoner:
-    backstage_preparation: Optional[TTS] = None
-    green_room: Path = Path('/opt/magi/voice_models')
-    chosen_performer: str = "tts_models/en/vctk/vits"
-    
-    def prepare_for_opening_night(self) -> Tuple[bool, str]:
-        """🎭 The stage is set, the curtains drawn..."""
-        try:
-            # Preparing the stage
-            self.green_room.mkdir(parents=True, exist_ok=True)
-            
-            # Summoning our star performer
-            print("🎭 Casting the leading role...")
-            self.backstage_preparation = TTS(
-                model_name=self.chosen_performer,
-                progress_bar=False
-            ).to("cuda" if torch.cuda.is_available() else "cpu")
-            
-            # The grand rehearsal
-            print("📜 Memorizing the script...")
-            self.backstage_preparation.save_pretrained(
-                self.green_room,
-                model_name="magi_voice"
-            )
-            
-            return True, "Standing ovation! The voice model has taken the stage! 🎊"
-            
-        except Exception as stage_fright:
-            return False, f"Performance anxiety struck: {stage_fright} 😱"
-
-def orchestrate_the_performance() -> int:
-    """🎬 Ladies and gentlemen, the show is about to begin!"""
-    print("🎭 Welcome to tonight's performance of The Voice Model! 🎭")
-    
-    director = TheatricalVoiceSummoner()
-    show_must_go_on, critics_review = director.prepare_for_opening_night()
-    
-    print(critics_review)
-    return 0 if show_must_go_on else 1
-
-if __name__ == "__main__":
-    sys.exit(orchestrate_the_performance())
-DRAMATIC_FINALE
-
-# 🎬 And now, for our feature presentation...
-chmod +x /opt/magi/summon_the_voice.py
-
-echo "🎭 Raising the curtain on our voice model performance..."
-python3 /opt/magi/summon_the_voice.py
-
-# Ensuring the stage crew has proper access
-echo "🎟️ Distributing backstage passes..."
-chown -R magi:magi /opt/magi/voice_models
-chmod -R 755 /opt/magi/voice_models
-
-# Taking a bow
-echo "🎭 The voice model installation has concluded! *bows gracefully* 🎭"
-# The Great Espeak Masquerade
-if ln -s /opt/magi/magi_espeak.py /usr/bin/magi_espeak; then
-    echo "🎭 Behold! Our python script is now masterfully disguised as espeak!"
-else
-    echo "😱 Alas! Our cunning plan of impersonation has been foiled!"
-    exit 1
-fi
-    
-    
 # Create required MAGI directories
 mkdir -p /tmp/MAGI
 touch /tmp/MAGI/current_context.txt
@@ -341,7 +258,131 @@ fi
 EOF
 chmod +x /etc/X11/xinit/xinitrc.d/50-magi-startup
 
-# Set up Python environment
+# Set up Python environment for voice
+python3 -m venv /opt/magi/voice_pyenv
+source /opt/magi/voice_pyenv/bin/activate
+pip install --upgrade pip
+pip install "TTS==0.22.0" --no-deps
+pip install numpy scipy torch torchaudio
+pip install "transformers<4.30.0" "tokenizers<0.14.0"
+pip install librosa scikit-learn inflect
+pip install "TTS==0.21.1"
+# Core processing libraries
+pip install einops encodec flask pandas matplotlib
+
+# Text processing libraries
+pip install anyascii nltk unidecode num2words pysbd cython coqpit aiohttp
+
+# Language-specific packages
+pip install jieba pypinyin
+pip install bangla bnnumerizer bnunicodenormalizer
+pip install g2pkk hangul-romanize jamo
+
+# Install spacy with Japanese support
+pip install "spacy[ja]>=3"
+
+# Install additional required packages
+pip install gruut[de,es,fr]==2.2.3
+pip install umap-learn trainer>=0.0.32
+
+# Update transformers to required version
+pip install --upgrade "transformers>=4.33.0"
+
+# Fix pandas version
+pip install "pandas>=1.4,<2.0"
+
+# more dependencies
+pip install watchdog
+pip install python-prctl
+pip install sounddevice
+    
+# 🎭 The Grand Voice Model Summoning Ceremony 🎭
+cat > /opt/magi/summon_the_voice.py << 'DRAMATIC_FINALE'
+#!/usr/bin/env python3
+from dataclasses import dataclass
+from pathlib import Path
+import sys
+from typing import Optional, Tuple, Literal
+import torch
+from TTS.api import TTS
+
+VocalPerformers = Literal[
+    "p226",  # The Mysterious Baritone
+    "p326",  # The Dramatic Bass
+    "p330",  # The Smooth Operator
+    "p347"   # The Gentle Giant
+]
+
+@dataclass
+class TheatricalVoiceSummoner:
+    backstage_preparation: Optional[TTS] = None
+    green_room: Path = Path('/opt/magi/voice_models')
+    chosen_performer: str = "tts_models/en/vctk/vits"
+    
+    def prepare_for_opening_night(self) -> Tuple[bool, str]:
+        """🎭 The stage is set, the curtains drawn..."""
+        try:
+            # Preparing the stage
+            self.green_room.mkdir(parents=True, exist_ok=True)
+            
+            # Summoning our star performer
+            print("🎭 Casting the leading role...")
+            self.backstage_preparation = TTS(
+                model_name=self.chosen_performer,
+                progress_bar=False
+            ).to("cuda" if torch.cuda.is_available() else "cpu")
+            
+            # The grand rehearsal
+            print("📜 Memorizing the script...")
+            self.backstage_preparation.save_pretrained(
+                self.green_room,
+                model_name="magi_voice"
+            )
+            
+            return True, "Standing ovation! The voice model has taken the stage! 🎊"
+            
+        except Exception as stage_fright:
+            return False, f"Performance anxiety struck: {stage_fright} 😱"
+
+def orchestrate_the_performance() -> int:
+    """🎬 Ladies and gentlemen, the show is about to begin!"""
+    print("🎭 Welcome to tonight's performance of The Voice Model! 🎭")
+    
+    director = TheatricalVoiceSummoner()
+    show_must_go_on, critics_review = director.prepare_for_opening_night()
+    
+    print(critics_review)
+    return 0 if show_must_go_on else 1
+
+if __name__ == "__main__":
+    sys.exit(orchestrate_the_performance())
+DRAMATIC_FINALE
+
+# 🎬 And now, for our feature presentation...
+chmod +x /opt/magi/summon_the_voice.py
+
+echo "🎭 Raising the curtain on our voice model performance..."
+python3 /opt/magi/summon_the_voice.py
+
+# Ensuring the stage crew has proper access
+echo "🎟️ Distributing backstage passes..."
+chown -R magi:magi /opt/magi/voice_models
+chmod -R 755 /opt/magi/voice_models
+
+# Taking a bow
+echo "🎭 The voice model installation has concluded! *bows gracefully* 🎭"
+# The Great Espeak Masquerade
+if ln -s /opt/magi/magi_espeak.py /usr/bin/magi_espeak; then
+    echo "🎭 Behold! Our python script is now masterfully disguised as espeak!"
+else
+    echo "😱 Alas! Our cunning plan of impersonation has been foiled!"
+    exit 1
+fi
+    
+deactivate
+
+
+# Set up Python environment ears
 python3 -m venv /opt/magi/ears_pyenv
 source /opt/magi/ears_pyenv/bin/activate
 
@@ -354,7 +395,8 @@ pip install --no-cache-dir --timeout 100 --retries 3 \
     requests \
     nvidia-ml-py \
     psutil \
-    sounddevice
+    sounddevice \
+    TTS
 
 pip install --no-cache-dir --timeout 300 --retries 3 \
     torch \

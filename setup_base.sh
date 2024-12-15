@@ -220,6 +220,15 @@ Section "Device"
 EndSection
 EOF
 
+
+# Create startup scripts
+cat > config/includes.chroot/opt/magi/start_voice_server.sh << 'EOF'
+#!/bin/bash
+source /opt/magi/voice_pyenv/bin/activate
+export PYTHONPATH=/opt/magi/voice_pyenv/lib/python3.11/site-packages
+exec python3 /opt/magi/voice.py
+EOF
+
 # Create startup scripts
 cat > config/includes.chroot/opt/magi/start_whisper_server.sh << 'EOF'
 #!/bin/bash

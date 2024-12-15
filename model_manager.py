@@ -27,7 +27,7 @@ from pathlib import Path
 BACKSTAGE = Path(__file__).parent.absolute()
 COSTUME_CLOSET = BACKSTAGE / 'ears_pyenv'
 WHISPER_SCRIPT = BACKSTAGE / 'whisper_server.py'
-BARITONE_SCRIPT = BACKSTAGE / 'voice.py'
+BARITONE_SCRIPT = BACKSTAGE / 'start_voice_server.sh'
 
 @dataclass
 class BaritoneWrangler:

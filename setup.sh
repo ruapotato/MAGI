@@ -64,6 +64,68 @@ else
     echo -e "${GREEN}All dependencies are installed${NC}"
 fi
 
+
+# Create Python virtual environment for voice server
+echo -e "${BLUE}Creating Python virtual environment for voice server...${NC}"
+VENV_DIR="$SCRIPT_DIR/voice_pyenv"
+
+if [ ! -d "$VENV_DIR" ]; then
+    python3 -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    pip install --upgrade pip
+    pip install "TTS==0.22.0" --no-deps
+    pip install numpy scipy torch torchaudio
+    pip install "transformers<4.30.0" "tokenizers<0.14.0"
+    pip install librosa scikit-learn inflect
+    pip install "TTS==0.21.1"
+    # Core processing libraries
+    pip install einops encodec flask pandas matplotlib
+
+    # Text processing libraries
+    pip install anyascii nltk unidecode num2words pysbd cython coqpit aiohttp
+
+    # Language-specific packages
+    pip install jieba pypinyin
+    pip install bangla bnnumerizer bnunicodenormalizer
+    pip install g2pkk hangul-romanize jamo
+
+    # Install spacy with Japanese support
+    pip install "spacy[ja]>=3"
+
+    # Install additional required packages
+    pip install gruut[de,es,fr]==2.2.3
+    pip install umap-learn trainer>=0.0.32
+
+    # Update transformers to required version
+    pip install --upgrade "transformers>=4.33.0"
+
+    # Fix pandas version
+    pip install "pandas>=1.4,<2.0"
+    
+    pip install watchdog
+    
+    pip install python-prctl
+    
+    pip install sounddevice
+
+    deactivate
+    
+    echo -e "${GREEN}Virtual environment created and dependencies installed${NC}"
+else
+    echo -e "${BLUE}Virtual environment already exists${NC}"
+fi
+
+
+# Create start script for Whisper server
+cat > "$SCRIPT_DIR/start_voice_server.sh" << 'EOL'
+#!/bin/bash
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source "$SCRIPT_DIR/voice_pyenv/bin/activate"
+python "$SCRIPT_DIR/voice.py"
+EOL
+chmod +x "$SCRIPT_DIR/start_voice_server.sh"
+
 # Create Python virtual environment for the Whisper server
 echo -e "${BLUE}Creating Python virtual environment for Whisper server...${NC}"
 VENV_DIR="$SCRIPT_DIR/ears_pyenv"
