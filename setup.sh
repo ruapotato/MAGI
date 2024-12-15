@@ -117,12 +117,11 @@ else
 fi
 
 
-# Create start script for Whisper server
-cat > "$SCRIPT_DIR/start_voice_server.sh" << 'EOL'
+cat > "$SCRIPT_DIR/start_voice_server.sh" << EOL
 #!/bin/bash
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-source "$SCRIPT_DIR/voice_pyenv/bin/activate"
-python "$SCRIPT_DIR/voice.py"
+SCRIPT_DIR="$SCRIPT_DIR"
+source "\$SCRIPT_DIR/voice_pyenv/bin/activate"
+python "\$SCRIPT_DIR/voice.py"
 EOL
 chmod +x "$SCRIPT_DIR/start_voice_server.sh"
 
