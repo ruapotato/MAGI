@@ -42,9 +42,11 @@ class BaritoneWrangler:
             self.green_room.mkdir(parents=True, exist_ok=True)
             self._escort_current_performer_offstage()
             
-            self.voice_artist = subprocess.Popen([
-                'python3', str(BARITONE_SCRIPT)
-            ])
+            self.voice_artist = subprocess.Popen(
+                str(BARITONE_SCRIPT),
+                shell=True,
+                executable='/bin/bash'  # Explicitly specify bash
+            )
             
             return self._await_dramatic_entrance()
             
