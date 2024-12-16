@@ -81,7 +81,8 @@ apt-get install -y \
     python3-pyaudio \
     python3-scipy \
     libsndfile1 \
-    ffmpeg
+    ffmpeg \
+    libcap-dev
     
 
 # Create required MAGI directories
@@ -304,6 +305,7 @@ import sys
 from typing import Optional, Tuple, Literal
 import torch
 from TTS.api import TTS
+import shutil
 
 VocalPerformers = Literal[
     "p226",  # The Mysterious Baritone
@@ -331,14 +333,16 @@ class TheatricalVoiceSummoner:
                 progress_bar=False
             ).to("cuda" if torch.cuda.is_available() else "cpu")
             
-            # The grand rehearsal
+            # Instead of using save_pretrained, we'll copy the downloaded model
             print("📜 Memorizing the script...")
-            self.backstage_preparation.save_pretrained(
-                self.green_room,
-                model_name="magi_voice"
-            )
-            
-            return True, "Standing ovation! The voice model has taken the stage! 🎊"
+            model_path = Path.home() / ".local/share/tts/tts_models--en--vctk--vits"
+            if model_path.exists():
+                # Copy all files from the downloaded model directory
+                for file in model_path.glob('*'):
+                    shutil.copy2(file, self.green_room / file.name)
+                return True, "Standing ovation! The voice model has taken the stage! 🎊"
+            else:
+                return False, "The performer seems to have missed their cue! Model not found. 😱"
             
         except Exception as stage_fright:
             return False, f"Performance anxiety struck: {stage_fright} 😱"
@@ -362,11 +366,6 @@ chmod +x /opt/magi/summon_the_voice.py
 
 echo "🎭 Raising the curtain on our voice model performance..."
 python3 /opt/magi/summon_the_voice.py
-
-# Ensuring the stage crew has proper access
-echo "🎟️ Distributing backstage passes..."
-chown -R magi:magi /opt/magi/voice_models
-chmod -R 755 /opt/magi/voice_models
 
 # Taking a bow
 echo "🎭 The voice model installation has concluded! *bows gracefully* 🎭"

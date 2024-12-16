@@ -8,6 +8,8 @@ from functools import partial, reduce, lru_cache
 from collections import deque
 import os
 import sys
+from pathlib import Path
+import time
 import json
 import re
 import asyncio
@@ -76,19 +78,23 @@ class EchoesInTheVoid:
     
     def __init__(self) -> None:
         self._vocal_enchantment = threading.Lock()
+        self._voice_dir = Path("/tmp/magi_realm/say")
+        self._voice_dir.mkdir(parents=True, exist_ok=True)
     
     async def echo_forth(self, prophecy: str) -> None:
         if not prophecy.strip():
             return
         
+        def _inscribe_prophecy():
+            try:
+                with self._vocal_enchantment:
+                    prophecy_file = self._voice_dir / f"speak_these_words_{time.time()}.txt"
+                    prophecy_file.write_text(prophecy)
+            except Exception as e:
+                print(f"Voice enchantment failed: {e}", file=sys.stderr)
+        
         threading.Thread(
-            target=lambda: self._vocal_enchantment.acquire()
-            and subprocess.run(
-                ['magi_espeak', prophecy],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            and self._vocal_enchantment.release(),
+            target=_inscribe_prophecy,
             daemon=True
         ).start()
 
