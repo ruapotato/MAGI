@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Get the script directory
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Get the root directory (parent of bin)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 
 # Create log directories and context file
 mkdir -p "$HOME/.cache/magi/logs"
@@ -32,6 +32,9 @@ export XDG_CACHE_HOME="$HOME/.cache"
 export XDG_DATA_HOME="$HOME/.local/share"
 export XDG_RUNTIME_DIR="/run/user/$UID"
 
+# Set Python path
+export PYTHONPATH="${SCRIPT_DIR}/src:${PYTHONPATH}"
+
 # Function to start MAGI shell with crash handling
 start_magi_shell() {
     local crash_count=0
@@ -56,7 +59,7 @@ start_magi_shell() {
         # Start MAGI shell with crash logging
         echo "Starting MAGI shell at $(date)" >> "$crash_log_file"
         {
-            python3 "$SCRIPT_DIR/magi_shell.py" 2>&1 
+            python3 "$SCRIPT_DIR/src/magi_shell/magi_shell.py" 2>&1 
         } >> "$crash_log_file" 2>&1
         
         exit_code=$?
@@ -88,7 +91,7 @@ start_magi_shell() {
 start_model_manager() {
     local log_file="$HOME/.cache/magi/logs/model_manager.log"
     echo "Starting Model Manager at $(date)" >> "$log_file"
-    python3 "$SCRIPT_DIR/model_manager.py" 2>&1 >> "$log_file" &
+    python3 -m magi_shell.monitors 2>&1 >> "$log_file" &
 }
 
 # Ensure DBUS is running first
@@ -153,26 +156,6 @@ if [ -x /usr/bin/mate-settings ]; then
     fi
 fi
 
-# Create default config if it doesn't exist
-mkdir -p "$HOME/.config/magi"
-CONFIG_FILE="$HOME/.config/magi/config.json"
-if [ ! -f "$CONFIG_FILE" ]; then
-    cat > "$CONFIG_FILE" << EOF
-{
-    "panel_height": 28,
-    "workspace_count": 4,
-    "enable_effects": true,
-    "enable_ai": true,
-    "terminal": "mate-terminal",
-    "launcher": "mate-panel --run-dialog",
-    "background": "/usr/share/magi/backgrounds/default.png",
-    "ollama_model": "mistral",
-    "whisper_endpoint": "http://localhost:5000/transcribe",
-    "sample_rate": 16000
-}
-EOF
-fi
-
 # Start GVFS
 /usr/lib/gvfs/gvfsd &
 /usr/lib/gvfs/gvfsd-fuse "$XDG_RUNTIME_DIR/gvfs" &
@@ -198,6 +181,7 @@ xcompmgr -c &
 mate-power-manager &
 
 # Load config values
+CONFIG_FILE="$HOME/.config/magi/config.json"
 if [ -f "$CONFIG_FILE" ]; then
     while IFS="=" read -r key value; do
         if [ ! -z "$key" ]; then

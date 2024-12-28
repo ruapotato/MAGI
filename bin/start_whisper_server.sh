@@ -1,4 +1,5 @@
 #!/bin/bash
-source "/home/david/MAGI/ears_pyenv/bin/activate"
-export PYTHONPATH="/home/david/MAGI/ears_pyenv/lib/python3.11/site-packages:$PYTHONPATH"
-exec python3 "/home/david/MAGI/src/utils/whisper_server.py"
+SCRIPT_DIR="/home/david/MAGI"
+source "$SCRIPT_DIR/ears_pyenv/bin/activate"
+export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"
+python "$SCRIPT_DIR/src/utils/whisper_server.py"

@@ -6,8 +6,8 @@ RED='\033[0;31m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Get absolute path to project directory
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# Get absolute path to project directory (parent of bin)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 USERNAME=$(whoami)
 
 echo -e "${BLUE}Setting up MAGI Shell...${NC}"
@@ -40,6 +40,9 @@ DEPS=(
     pkg-config
     libportaudio2
     portaudio19-dev
+    wmctrl
+    x11-utils
+    xclip
 )
 
 echo -e "${BLUE}Checking dependencies...${NC}"
@@ -63,7 +66,6 @@ if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
 else
     echo -e "${GREEN}All dependencies are installed${NC}"
 fi
-
 
 # Create Python virtual environment for voice server
 echo -e "${BLUE}Creating Python virtual environment for voice server...${NC}"
@@ -115,14 +117,14 @@ else
     echo -e "${BLUE}Virtual environment already exists${NC}"
 fi
 
-
-cat > "$SCRIPT_DIR/start_voice_server.sh" << EOL
+# Create voice server start script
+cat > "$SCRIPT_DIR/bin/start_voice_server.sh" << EOL
 #!/bin/bash
 SCRIPT_DIR="$SCRIPT_DIR"
 source "\$SCRIPT_DIR/voice_pyenv/bin/activate"
-python "\$SCRIPT_DIR/voice.py"
+python "\$SCRIPT_DIR/src/utils/voice.py"
 EOL
-chmod +x "$SCRIPT_DIR/start_voice_server.sh"
+chmod +x "$SCRIPT_DIR/bin/start_voice_server.sh"
 
 # Create Python virtual environment for the Whisper server
 echo -e "${BLUE}Creating Python virtual environment for Whisper server...${NC}"
@@ -157,13 +159,14 @@ else
     echo -e "${BLUE}Virtual environment already exists${NC}"
 fi
 
-# Make scripts executable
-chmod +x "$SCRIPT_DIR/magi_shell.py"
-chmod +x "$SCRIPT_DIR/start.sh"
-
 # Create necessary directories
 mkdir -p ~/.config/magi
 mkdir -p ~/.local/share/applications
+mkdir -p ~/.cache/magi/logs
+mkdir -p ~/.cache/magi/crash_reports
+mkdir -p /tmp/MAGI
+touch /tmp/MAGI/current_context.txt
+chmod 666 /tmp/MAGI/current_context.txt
 
 # Create MAGI config directory
 mkdir -p ~/.config/magi
@@ -183,14 +186,15 @@ cat > ~/.config/magi/config.json << EOL
 EOL
 
 # Create start script for Whisper server
-cat > "$SCRIPT_DIR/start_whisper_server.sh" << 'EOL'
+cat > "$SCRIPT_DIR/bin/start_whisper_server.sh" << EOL
 #!/bin/bash
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-source "$SCRIPT_DIR/ears_pyenv/bin/activate"
-python "$SCRIPT_DIR/server.py"
+SCRIPT_DIR="$SCRIPT_DIR"
+source "\$SCRIPT_DIR/ears_pyenv/bin/activate"
+export PYTHONPATH="\$SCRIPT_DIR/src:\$PYTHONPATH"
+python "\$SCRIPT_DIR/src/utils/whisper_server.py"
 EOL
 
-chmod +x "$SCRIPT_DIR/start_whisper_server.sh"
+chmod +x "$SCRIPT_DIR/bin/start_whisper_server.sh"
 
 # Create systemd service file for Whisper server
 sudo tee /etc/systemd/system/magi-whisper.service << EOL
@@ -201,7 +205,7 @@ After=network.target
 [Service]
 Type=simple
 User=$USERNAME
-ExecStart=$SCRIPT_DIR/start_whisper_server.sh
+ExecStart=$SCRIPT_DIR/bin/start_whisper_server.sh
 WorkingDirectory=$SCRIPT_DIR
 Restart=always
 RestartSec=3
@@ -221,7 +225,7 @@ sudo tee /usr/share/xsessions/magi.desktop << EOL
 [Desktop Entry]
 Name=MAGI Shell
 Comment=Machine Augmented GTK Interface
-Exec=${SCRIPT_DIR}/start.sh
+Exec=${SCRIPT_DIR}/bin/start.sh
 Type=Application
 DesktopNames=MAGI
 EOL
@@ -231,7 +235,7 @@ cat > ~/.local/share/applications/magi.desktop << EOL
 [Desktop Entry]
 Name=MAGI Shell
 Comment=Machine Augmented GTK Interface
-Exec=${SCRIPT_DIR}/start.sh
+Exec=${SCRIPT_DIR}/bin/start.sh
 Type=Application
 Categories=System;
 Icon=preferences-desktop
@@ -243,6 +247,7 @@ if ! grep -q "MAGI_DIR" "$HOME/.profile" 2>/dev/null; then
 
 # MAGI Shell environment
 export MAGI_DIR="${SCRIPT_DIR}"
+export PYTHONPATH="${SCRIPT_DIR}/src:${PYTHONPATH}"
 export GTK_THEME=Adwaita
 export XCURSOR_THEME=Adwaita
 export XCURSOR_SIZE=24
@@ -262,6 +267,10 @@ export XCURSOR_THEME=Adwaita
 export XCURSOR_SIZE=24
 export DISPLAY=:0
 EOL
+
+# Clean up any existing instances
+pkill -f magi_shell.py >/dev/null 2>&1
+pkill xcompmgr >/dev/null 2>&1
 
 # Verify installation
 echo -e "\n${GREEN}MAGI Shell setup complete!${NC}"
@@ -285,14 +294,10 @@ echo "Alt + Tab: Switch windows"
 echo "Ctrl + Alt + T: Launch terminal"
 echo "Alt + F4: Close window"
 
-# Clean up any existing instances
-pkill -f magi_shell.py >/dev/null 2>&1
-pkill xcompmgr >/dev/null 2>&1
-
 # Offer to test the setup
 echo -e "\n${BLUE}Would you like to test MAGI Shell now? (y/n)${NC}"
 read -r response
 if [[ "$response" =~ ^[Yy]$ ]]; then
     echo "Starting MAGI Shell..."
-    exec "$SCRIPT_DIR/start.sh"
+    exec "$SCRIPT_DIR/bin/start.sh"
 fi
