@@ -33,11 +33,14 @@ MAGI OS can be built on any Debian-based system:
 git clone https://github.com/ruapotato/MAGI
 cd MAGI
 
+# Install dependencies
+sudo apt install xclip wmctrl xdotool x11-utils
+
 # For local installation
-./setup.sh
+./bin/setup.sh
 
 # To build the ISO (requires root)
-sudo ./build.sh
+sudo ./bin/build.sh
 ```
 
 The build process will:
@@ -48,10 +51,27 @@ The build process will:
 
 The resulting ISO will be in the `magi-os-build` directory.
 
-## Architecture
+## Project Structure
+
+```
+MAGI/
+├── LICENSE
+├── README.md
+├── bin/          # Executable scripts
+├── setup/        # Installation and build scripts
+├── src/
+│   ├── magi_shell/   # Core shell components
+│   │   ├── core/     # Core functionality
+│   │   ├── models/   # AI model integration
+│   │   ├── monitors/ # System monitoring
+│   │   ├── utils/    # Internal utilities
+│   │   └── widgets/  # GUI components
+│   └── utils/        # Standalone utilities and servers
+├── docs/         # Documentation
+```
 
 ### Core Components
-- **MAGI Shell**: Custom GTK3-based desktop environment
+- **MAGI Shell**: Custom GTK4-based desktop environment
 - **Ollama**: Local LLM integration
 - **Whisper**: Speech-to-text processing
 - **MATE**: Base desktop components
@@ -94,21 +114,19 @@ Edit `~/.config/magi/config.json`:
 - [x] Context system
 - [x] NVIDIA driver support
 - [x] ISO building
+- [x] Modular code organization
+- [x] Improved build scripts
 
 ### Coming Soon
 - [ ] Installer
-- [ ] Natural language command interface
 - [ ] AI-powered agents
-- [ ] Tokyo Night theme
+- [ ] Workspace-specific app lists
+- [ ] Background image settings
+- [ ] Improved model management
+- [ ] System update mechanism
 
 ## Contributing
-MAGI OS is an experimental project and we welcome contributions:
-- Feature suggestions
-- Code contributions
-- Documentation improvements
-- Testing and bug reports
-- Design ideas
-- Use case examples
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for detailed contribution guidelines and setup instructions.
 
 ## Security Notes
 - All AI processing runs locally
@@ -125,11 +143,6 @@ it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
 ## Contact & Community
 - Website: [255.one](https://255.one)
 - Email: ke7oxh@gmail.com
@@ -139,7 +152,7 @@ GNU General Public License for more details.
 Current Stage: **Public Alpha Test**
 - Basic functionality working
 - Active development
-- Seeking community feedback
+- Community contributions welcome
 - Not recommended for production use
 
 ---
