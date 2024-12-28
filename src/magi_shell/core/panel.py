@@ -379,17 +379,45 @@ class MAGIPanel(Gtk.ApplicationWindow):
         except Exception as e:
             print(f"Error launching voice assistant: {e}")
 
+
+    def _check_monitor_changes(self):
+        """Periodically check for monitor changes."""
+        display = self.get_display()
+        current_monitor = display.get_primary_monitor()
+        
+        # Check if monitor geometry has changed
+        if hasattr(self, '_last_monitor_geometry'):
+            current_geometry = current_monitor.get_geometry()
+            if (current_geometry.width != self._last_monitor_geometry.width or
+                current_geometry.height != self._last_monitor_geometry.height or
+                current_geometry.x != self._last_monitor_geometry.x or
+                current_geometry.y != self._last_monitor_geometry.y):
+                self._update_geometry()
+        
+        # Store current geometry for next comparison
+        self._last_monitor_geometry = current_monitor.get_geometry()
+        
+        return True  # Keep the timeout active
+
     def _on_realize(self, widget):
         """Handle window realization."""
         self._update_geometry()
         self._setup_window_properties()
+        
+        # Set up monitor change handling through display object
+        display = self.get_display()
+        
+        # Instead of trying to connect to signals, we'll use a periodic check
+        # This is a more reliable fallback approach
+        GLib.timeout_add(2000, self._check_monitor_changes)
     
     def _setup_window(self):
         """Set up the panel window geometry and basic container."""
         display = self.get_display()
-        monitor = display.get_monitors()[0]
-        geometry = monitor.get_geometry()
-        scale = monitor.get_scale_factor()
+        primary_monitor = display.get_primary_monitor()  # GTK4's method for getting primary monitor
+        
+        geometry = primary_monitor.get_geometry()
+        scale = primary_monitor.get_scale_factor()
         
         self.panel_width = geometry.width
         
@@ -400,6 +428,10 @@ class MAGIPanel(Gtk.ApplicationWindow):
         self.set_size_request(self.panel_width, self.panel_height)
         self.set_default_size(self.panel_width, self.panel_height)
         
+        # Store monitor info for later use
+        self._monitor = primary_monitor
+        
+        # Create main container box
         self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         self.box.set_margin_start(2)
         self.box.set_margin_end(2)
@@ -411,69 +443,77 @@ class MAGIPanel(Gtk.ApplicationWindow):
         try:
             window_id = self._get_window_id()
             if window_id:
+                # Set window type first
                 subprocess.run([
                     'xprop', '-id', window_id,
                     '-f', '_NET_WM_WINDOW_TYPE', '32a',
                     '-set', '_NET_WM_WINDOW_TYPE', '_NET_WM_WINDOW_TYPE_DOCK'
                 ], check=True)
                 
-                self._set_geometry(window_id)
-                
+                # Update geometry for the new monitor
+                self._update_geometry()
+                    
+                # Set window properties after geometry
                 subprocess.run(['wmctrl', '-i', '-r', window_id, '-b', 'add,sticky,above'], check=True)
                 subprocess.run(['wmctrl', '-i', '-r', window_id, '-T', f'MAGI Panel ({self.position})'], check=True)
                 
+                # Force window manager to acknowledge changes
                 subprocess.run(['wmctrl', '-i', '-a', window_id], check=True)
         except Exception as e:
             print(f"Window property setup error: {e}")
     
     def _update_geometry(self):
-        """Update panel geometry."""
+        """Update panel geometry based on primary monitor."""
         if not self.get_realized():
             return
         
         try:
-            window_id = self._get_window_id()
-            if window_id:
-                self._set_geometry(window_id)
+            display = self.get_display()
+            primary_monitor = display.get_primary_monitor()
+            
+            # Only update if primary monitor has changed
+            if (not hasattr(self, '_monitor') or 
+                primary_monitor.get_geometry() != self._monitor.get_geometry()):
+                
+                self._monitor = primary_monitor
+                geometry = primary_monitor.get_geometry()
+                scale = primary_monitor.get_scale_factor()
+                
+                window_id = self._get_window_id()
+                if window_id:
+                    # Update panel dimensions
+                    self.panel_width = geometry.width
+                    base_height = self.config['panel_height'] * scale
+                    self.panel_height = base_height + (8 if self.position == 'bottom' else 4)
+                    
+                    # Set new position and size
+                    x = geometry.x
+                    y = geometry.y if self.position == 'top' else geometry.y + geometry.height - self.panel_height
+                    
+                    subprocess.run(['xdotool', 'windowmove', window_id, str(x), str(y)])
+                    subprocess.run(['xdotool', 'windowsize', window_id, str(self.panel_width), str(self.panel_height)])
+                    
+                    # Update struts
+                    if self.position == 'top':
+                        struts = f'0, 0, {self.panel_height}, 0, 0, 0, 0, 0, {x}, {x + self.panel_width}, 0, 0'
+                    else:
+                        struts = f'0, 0, 0, {self.panel_height}, 0, 0, 0, 0, 0, 0, {x}, {x + self.panel_width}'
+                    
+                    subprocess.run([
+                        'xprop', '-id', window_id,
+                        '-f', '_NET_WM_STRUT_PARTIAL', '32c',
+                        '-set', '_NET_WM_STRUT_PARTIAL', struts
+                    ])
         except Exception as e:
             print(f"Geometry update error: {e}")
     
-    def _set_geometry(self, window_id):
-        """Set window geometry and struts."""
-        display = self.get_display()
-        monitor = display.get_monitors()[0]
-        geometry = monitor.get_geometry()
-        scale = monitor.get_scale_factor()
-        
-        try:
-            output = subprocess.check_output(['xwininfo', '-id', window_id]).decode()
-            for line in output.splitlines():
-                if 'Height:' in line:
-                    actual_height = int(line.split()[-1])
-                    break
-        except:
-            actual_height = self.panel_height
-        
-        width = geometry.width
-        x = geometry.x
-        y = geometry.y if self.position == 'top' else geometry.y + geometry.height - actual_height
-        
-        subprocess.run(['xdotool', 'windowmove', window_id, str(x), str(y)])
-        subprocess.run(['xdotool', 'windowsize', window_id, str(width), str(actual_height)])
-        
-        if self.position == 'top':
-            struts = f'0, 0, {actual_height}, 0, 0, 0, 0, 0, {x}, {x + width}, 0, 0'
-        else:
-            struts = f'0, 0, 0, {actual_height}, 0, 0, 0, 0, 0, 0, {x}, {x + width}'
-        
-        subprocess.run([
-            'xprop', '-id', window_id,
-            '-f', '_NET_WM_STRUT_PARTIAL', '32c',
-            '-set', '_NET_WM_STRUT_PARTIAL', struts
-        ])
+    
+    def do_monitors_changed(self, display):
+        """Handle monitor changes."""
+        GLib.idle_add(self._update_geometry)
     
     def _get_window_id(self):
-        """Get window ID using multiple methods"""
+        """Get window ID using multiple methods."""
         window_id = self._cache.get('window_id')
         if window_id:
             return window_id
@@ -502,7 +542,6 @@ class MAGIPanel(Gtk.ApplicationWindow):
                     wid = line.split()[0]
                     self._cache.set('window_id', wid)
                     return wid
-                    
         except Exception as e:
             print(f"Window ID lookup error: {e}")
         
