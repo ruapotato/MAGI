@@ -1,0 +1,15 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+# Credentials
+web_creds.txt
+# Python environments
+*_pyenv/
+
+# Build directories
+magi-os-build/
+
+# Cache directories
+audio_cache/
+static/

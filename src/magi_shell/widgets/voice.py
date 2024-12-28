@@ -17,6 +17,7 @@ import requests
 import subprocess
 import time
 import os
+from ..utils.config import load_config
 
 class WhisperingEarButton(Gtk.Button):
     """
