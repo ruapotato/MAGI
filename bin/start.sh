@@ -59,7 +59,7 @@ start_magi_shell() {
         # Start MAGI shell with crash logging
         echo "Starting MAGI shell at $(date)" >> "$crash_log_file"
         {
-            python3 "$SCRIPT_DIR/src/magi_shell/magi_shell.py" 2>&1 
+            bash "$SCRIPT_DIR/bin/start_shell.sh" 2>&1 
         } >> "$crash_log_file" 2>&1
         
         exit_code=$?
