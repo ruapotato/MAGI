@@ -147,9 +147,102 @@ class MAGILauncher(Adw.ApplicationWindow):
                 except Exception:
                     pass
         
-        logger.info("Applications loaded")
-        self.search_entry.grab_focus()
-        return False
+        # Load Flatpak applications
+        try:
+            flatpak_output = subprocess.check_output(['flatpak', 'list', '--columns=application,name,description,arch'], text=True)
+            logger.info(f"Flatpak list output:\n{flatpak_output}")
+            
+            flatpak_apps = [line.split('\t') for line in flatpak_output.strip().split('\n')[1:]]  # Skip header
+            
+            logger.info(f"Parsed Flatpak apps: {flatpak_apps}")
+            
+            for app_data in flatpak_apps:
+                # Debugging: log each app data entry
+                logger.debug(f"Processing app data: {app_data}")
+                
+                # Ensure we have at least 2 values and skip non-application entries
+                if len(app_data) < 2:
+                    logger.warning(f"Skipping app data with insufficient columns: {app_data}")
+                    continue
+                
+                # Skip platform, runtime, and GL entries
+                if any(x in app_data[0] for x in [
+                    'Platform', 'Platform.GL', 'freedesktop', 'nvidia', 'runtime'
+                ]):
+                    logger.debug(f"Skipping platform/runtime entry: {app_data[0]}")
+                    continue
+                
+                # Use the first two columns as app_id and name
+                app_id = app_data[0]
+                name = app_data[1]
+                
+                # Try to get a description if available
+                description = app_data[2] if len(app_data) > 2 else ""
+                
+                if app_id in added_apps:
+                    logger.debug(f"App {app_id} already added")
+                    continue
+                
+                # Construct a .desktop file path for Flatpak app
+                desktop_file_path = os.path.expanduser(f'~/.local/share/applications/{app_id}.desktop')
+                logger.debug(f"Attempting to create/use desktop file: {desktop_file_path}")
+                
+                # Check if a .desktop file already exists for the Flatpak app
+                existing_desktop_files = [
+                    f'/var/lib/flatpak/exports/share/applications/{app_id}.desktop',
+                    f'/usr/local/share/applications/{app_id}.desktop',
+                    desktop_file_path
+                ]
+                
+                desktop_file_to_use = None
+                for possible_file in existing_desktop_files:
+                    if os.path.exists(possible_file):
+                        desktop_file_to_use = possible_file
+                        logger.debug(f"Found existing desktop file: {possible_file}")
+                        break
+                
+                # If no existing desktop file, create a new one
+                if not desktop_file_to_use:
+                    try:
+                        with open(desktop_file_path, 'w') as f:
+                            f.write(f'[Desktop Entry]\n')
+                            f.write(f'Type=Application\n')
+                            f.write(f'Name={name}\n')
+                            f.write(f'Comment={description}\n')
+                            f.write(f'Exec=flatpak run {app_id}\n')
+                            f.write(f'Icon=package-x-generic\n')
+                            f.write(f'Categories=Utility;\n')
+                        desktop_file_to_use = desktop_file_path
+                        logger.debug(f"Created new desktop file: {desktop_file_path}")
+                    except IOError as io_err:
+                        logger.error(f"Failed to create desktop file for {app_id}: {io_err}")
+                        continue
+                
+                # Try to create DesktopAppInfo
+                try:
+                    # Use the full path to the .desktop file
+                    app_info = Gio.DesktopAppInfo.new_from_filename(desktop_file_to_use)
+                    
+                    if not app_info:
+                        logger.error(f"Failed to create DesktopAppInfo for {app_id} using file {desktop_file_to_use}")
+                        continue
+                    
+                    row = self._create_app_row(app_info)
+                    self.list_box.append(row)
+                    self._apps.append(row)
+                    added_apps.add(app_id)
+                    logger.info(f"Successfully added Flatpak app: {app_id}")
+                
+                except Exception as info_err:
+                    logger.error(f"Error processing Flatpak app {app_id}: {info_err}")
+                
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to load Flatpak applications: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error loading Flatpak applications: {e}")
+        
+        # Log final apps added
+        logger.info(f"Total Flatpak apps added: {len(added_apps)}")
 
     def _create_app_row(self, app_info):
         row = Gtk.ListBoxRow()
@@ -212,7 +305,11 @@ class MAGILauncher(Adw.ApplicationWindow):
     def _launch_app(self, row):
         if row and row.app_info:
             try:
-                row.app_info.launch()
+                app_info = row.app_info
+                if isinstance(app_info, Gio.DesktopAppInfo):
+                    app_info.launch()
+                else:
+                    subprocess.Popen(['flatpak', 'run', app_info.get_id()])
                 self.close()
             except Exception as e:
                 logger.error(f"Failed to launch application: {e}")
@@ -223,7 +320,7 @@ class MAGILauncher(Adw.ApplicationWindow):
 class MAGILauncherApplication(Adw.Application):
     def __init__(self):
         super().__init__(application_id='com.system.magi.launcher')
-    
+
     def do_activate(self):
         win = MAGILauncher(self)
         win.present()
