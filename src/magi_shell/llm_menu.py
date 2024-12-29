@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""
+MAGI Shell LLM Menu Component
+
+Provides a GTK4-based interface for interacting with the MAGI Shell's
+LLM capabilities, including context-aware queries and voice input.
+"""
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -9,42 +15,19 @@ import sys
 import json
 import requests
 import threading
-import sounddevice as sd
 import numpy as np
 import time
 import subprocess
-from ThemeManager import ThemeManager
+from pathlib import Path
 
-
-def load_config():
-    """Load configuration from JSON file"""
-    config_path = os.path.expanduser("~/.config/magi/config.json")
-    try:
-        with open(config_path) as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Warning: Could not load config ({e}), using defaults")
-        default_config = {
-            'panel_height': 28,
-            'workspace_count': 4,
-            'enable_effects': True,
-            'enable_ai': True,
-            'terminal': 'mate-terminal',
-            'launcher': 'mate-panel --run-dialog',
-            'background': '/usr/share/magi/backgrounds/default.png',
-            'ollama_model': 'mistral',
-            'whisper_endpoint': 'http://localhost:5000/transcribe',
-            'sample_rate': 16000
-        }
-        try:
-            os.makedirs(os.path.dirname(config_path), exist_ok=True)
-            with open(config_path, 'w') as f:
-                json.dump(default_config, f, indent=4)
-        except Exception as e:
-            print(f"Warning: Could not save config: {e}")
-        return default_config
+from magi_shell.core.theme import ThemeManager
+from magi_shell.utils.config import load_config
+from magi_shell.widgets.voice import WhisperingEarButton
+from magi_shell.utils.cache import Cache
 
 class MessageBox(Gtk.Box):
+    """A message box for displaying chat messages with actions."""
+    
     def __init__(self, text, is_user=True, parent_window=None, is_code=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.parent_window = parent_window
@@ -146,21 +129,19 @@ class MessageBox(Gtk.Box):
             dialog.present()
 
 class MainWindow(Adw.ApplicationWindow):
+    """Main window for the LLM Menu interface."""
+    
     def __init__(self, app):
         super().__init__(application=app)
         
         ThemeManager().register_window(self)
         
-        self.recording_stream = None
-        self.audio_data = []
-        self.record_start_time = 0
-        self.is_transcribing = False
-        self.is_recording = False
         
         self.set_opacity(0.0)
         self.setup_window()
     
     def setup_window(self):
+        """Initialize the window layout."""
         self.set_title("MAGI Assistant")
         self.set_default_size(800, 600)
         
@@ -190,19 +171,6 @@ class MainWindow(Adw.ApplicationWindow):
         
         button_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         
-        self.record_button = Gtk.Button()
-        self.mic_icon = Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic")
-        self.record_icon = Gtk.Image.new_from_icon_name("media-record-symbolic")
-        self.record_button.set_child(self.mic_icon)
-        self.record_button.set_sensitive(True)
-        
-        click = Gtk.GestureClick.new()
-        click.set_button(1)
-        click.connect('begin', self.start_recording)
-        click.connect('end', self.stop_recording)
-        self.record_button.add_controller(click)
-        
-        button_box.append(self.record_button)
         
         self.send_button = Gtk.Button(label="Send")
         self.send_button.add_css_class('suggested-action')
@@ -222,6 +190,7 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.timeout_add(50, self.setup_position)
 
     def connect_signals(self):
+        """Connect signal handlers."""
         focus_controller = Gtk.EventControllerFocus.new()
         focus_controller.connect('leave', self.on_focus_lost)
         self.add_controller(focus_controller)
@@ -234,6 +203,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.add_controller(key_controller)
     
     def setup_position(self):
+        """Position window on screen."""
         display = self.get_display()
         monitor = display.get_monitors()[0]
         geometry = monitor.get_geometry()
@@ -246,6 +216,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
     
     def move_and_show_window(self, x, y):
+        """Move window to position and fade in."""
         try:
             out = subprocess.check_output(['xdotool', 'search', '--name', '^MAGI Assistant$']).decode().strip()
             if out:
@@ -258,6 +229,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def fade_in_window(self):
+        """Fade in window opacity."""
         current_opacity = self.get_opacity()
         if current_opacity < 1.0:
             self.set_opacity(min(current_opacity + 0.2, 1.0))
@@ -265,16 +237,18 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def on_focus_lost(self, controller):
-        if not (self.is_recording or self.is_transcribing):
-            self.close()
+        """Handle window losing focus."""
+        self.close()
     
     def on_key_pressed(self, controller, keyval, keycode, state):
+        """Handle key press events."""
         if keyval == Gdk.KEY_Escape:
             self.close()
             return True
         return False
 
     def scroll_to_bottom(self):
+        """Scroll messages to bottom."""
         def _scroll():
             adj = self.messages_box.get_parent().get_vadjustment()
             adj.set_value(adj.get_upper() - adj.get_page_size())
@@ -282,6 +256,7 @@ class MainWindow(Adw.ApplicationWindow):
         GLib.timeout_add(100, _scroll)
     
     def add_message(self, text, is_user=True):
+        """Add a new message to the chat."""
         msg_box = MessageBox(text, is_user, self)
         self.messages_box.append(msg_box)
         self.scroll_to_bottom()
@@ -289,6 +264,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.save_history()
     
     def on_send(self, widget):
+        """Handle send button click or Enter key."""
         text = self.entry.get_text().strip()
         if text:
             self.add_message(text, True)
@@ -296,6 +272,7 @@ class MainWindow(Adw.ApplicationWindow):
             threading.Thread(target=self.send_to_ollama, args=(text,)).start()
 
     def send_to_ollama(self, prompt):
+        """Send message to Ollama and handle streaming response."""
         try:
             context = self.load_context()
             
@@ -364,13 +341,15 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.idle_add(lambda: self.add_message(error_msg, False))
 
     def load_context(self):
+        """Load current context from file."""
         try:
             with open('/tmp/MAGI/current_context.txt', 'r') as f:
                 return f.read().strip()
         except FileNotFoundError:
             return ""
-
+            
     def clear_history(self, widget=None):
+        """Clear chat history."""
         while (child := self.messages_box.get_first_child()):
             self.messages_box.remove(child)
         self.save_history()
@@ -379,148 +358,8 @@ class MainWindow(Adw.ApplicationWindow):
         except FileNotFoundError:
             pass
 
-    def start_recording(self, gesture, sequence):
-        if self.is_transcribing:
-            return
-            
-        print("Starting recording...")
-        self.is_recording = True
-        if self.recording_stream:
-            try:
-                self.recording_stream.stop()
-                self.recording_stream.close()
-            except:
-                pass
-            self.recording_stream = None
-            
-        self.audio_data = []
-        self.record_start_time = time.time()
-        
-        # Use system default audio input
-        try:
-            config = load_config()
-            sample_rate = config.get('sample_rate', 16000)
-            
-            def audio_callback(indata, *args):
-                if hasattr(self, 'audio_data'):
-                    self.audio_data.append(indata.copy())
-            
-            self.recording_stream = sd.InputStream(
-                channels=1,
-                callback=audio_callback,
-                blocksize=1024,
-                samplerate=sample_rate,
-                dtype=np.float32
-            )
-            self.recording_stream.start()
-            self.record_button.add_css_class('recording')
-            self.record_button.set_child(self.record_icon)
-            print(f"Recording started with default device at {sample_rate}Hz")
-        except Exception as e:
-            print(f"Recording Error: {e}")
-            self.recording_stream = None
-            self.record_button.set_child(self.mic_icon)
-            dialog = Adw.MessageDialog.new(
-                self,
-                "Recording Error",
-                str(e)
-            )
-            dialog.add_response("ok", "OK")
-            dialog.present()
-    
-    def stop_recording(self, gesture, sequence):
-        if self.is_transcribing:
-            return
-                
-        print("Stopping recording...")
-        self.is_recording = False
-        recording_duration = time.time() - self.record_start_time
-        
-        if self.recording_stream:
-            try:
-                self.recording_stream.stop()
-                self.recording_stream.close()
-                self.recording_stream = None
-            except Exception as e:
-                print(f"Error stopping recording: {e}")
-        
-        self.record_button.set_child(self.mic_icon)
-        self.record_button.remove_css_class('recording')
-        
-        if recording_duration < 0.5:
-            print("Recording too short")
-            if not hasattr(self, '_speaking'):
-                self._speaking = True
-                subprocess.run(['magi_espeak', "Press and hold to record audio"])
-                GLib.timeout_add(2000, self._reset_speaking_state)
-            return
-        
-        if self.audio_data:
-            try:
-                print("Processing audio...")
-                self.is_transcribing = True
-                self.record_button.set_sensitive(False)
-                
-                # Create a copy of audio data to process
-                audio_data = np.concatenate(self.audio_data.copy())
-                self.audio_data = []
-                
-                def transcribe():
-                    try:
-                        print("Sending to whisper...")
-                        config = load_config()
-                        endpoint = config.get('whisper_endpoint', 'http://localhost:5000/transcribe')
-                        files = {'audio': ('audio.wav', audio_data.tobytes())}
-                        response = requests.post(endpoint, files=files)
-                        
-                        def handle_response():
-                            self.is_transcribing = False
-                            self.record_button.set_sensitive(True)
-                            
-                            if response.ok:
-                                text = response.json().get('transcription', '')
-                                if text:
-                                    self.entry.set_text(text)
-                                    self.entry.grab_focus()
-                            else:
-                                print(f"Transcription error: {response.status_code}")
-                        
-                        GLib.idle_add(handle_response)
-                    
-                    except Exception as e:
-                        print(f"Transcription error: {e}")
-                        GLib.idle_add(lambda: setattr(self, 'is_transcribing', False))
-                        GLib.idle_add(lambda: self.record_button.set_sensitive(True))
-                
-                threading.Thread(target=transcribe, daemon=True).start()
-                
-            except Exception as e:
-                print(f"Audio processing error: {e}")
-                self.is_transcribing = False
-                self.record_button.set_sensitive(True)
-        
-        else:
-            print("No audio data collected")
-            self.record_button.set_sensitive(True)
-
-    def _reset_speaking_state(self):
-        if hasattr(self, '_speaking'):
-            delattr(self, '_speaking')
-        return False
-
-    def cleanup_recording(self):
-        if self.recording_stream:
-            try:
-                self.recording_stream.stop()
-                self.recording_stream.close()
-                self.recording_stream = None
-            except Exception as e:
-                print(f"Error cleaning up recording stream: {e}")
-        
-        self.audio_data = []
-        self.record_button.remove_css_class('recording')
-    
     def load_history(self):
+        """Load chat history from file."""
         try:
             with open('/tmp/MAGI/chat_history.json', 'r') as f:
                 history = json.load(f)
@@ -537,6 +376,7 @@ class MainWindow(Adw.ApplicationWindow):
             pass
     
     def save_history(self):
+        """Save chat history to file."""
         history = []
         for child in self.messages_box:
             if isinstance(child, MessageBox):
@@ -550,15 +390,20 @@ class MainWindow(Adw.ApplicationWindow):
         with open('/tmp/MAGI/chat_history.json', 'w') as f:
             json.dump(history, f)
 
+
 class MAGIApplication(Adw.Application):
+    """Main application class for LLM Menu."""
+    
     def __init__(self):
         super().__init__(application_id='com.system.magi.llm')
     
     def do_activate(self):
+        """Handle application activation."""
         win = MainWindow(self)
         win.present()
 
 def main():
+    """Application entry point."""
     app = MAGIApplication()
     return app.run(sys.argv)
 
