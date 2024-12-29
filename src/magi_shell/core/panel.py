@@ -177,18 +177,12 @@ class MAGIPanel(Gtk.ApplicationWindow):
         """Initialize application launcher."""
         from .launcher import MAGILauncher  # Import at top of file
         self._launcher = MAGILauncher(self)
-
-    def _show_launcher(self, button):
-        """Show the application launcher."""
-        if not hasattr(self, '_launcher'):
-            self._setup_launcher()
-        self._launcher.present()
     
     def _setup_top_panel(self):
         """Set up top panel widgets."""
         launcher = Gtk.Button(label=" MAGI ")
         launcher.add_css_class('launcher-button')
-        launcher.connect('clicked', self._show_launcher)
+        launcher.connect('clicked', lambda w: subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), 'launcher.py')]))
         
         workspace_switcher = WorkspaceSwitcher(self._update_manager)
         window_list = WindowList(self._update_manager)
