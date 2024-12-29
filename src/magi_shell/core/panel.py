@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # src/magi_shell/core/panel.py
 """
 Core panel implementation for MAGI Shell.
@@ -172,12 +173,22 @@ class MAGIPanel(Gtk.ApplicationWindow):
             self._setup_top_panel()
         else:
             self._setup_bottom_panel()
+    def _setup_launcher(self):
+        """Initialize application launcher."""
+        from .launcher import MAGILauncher  # Import at top of file
+        self._launcher = MAGILauncher(self)
 
+    def _show_launcher(self, button):
+        """Show the application launcher."""
+        if not hasattr(self, '_launcher'):
+            self._setup_launcher()
+        self._launcher.present()
+    
     def _setup_top_panel(self):
         """Set up top panel widgets."""
         launcher = Gtk.Button(label=" MAGI ")
         launcher.add_css_class('launcher-button')
-        launcher.connect('clicked', lambda w: self._launch_command(self.config['launcher']))
+        launcher.connect('clicked', self._show_launcher)
         
         workspace_switcher = WorkspaceSwitcher(self._update_manager)
         window_list = WindowList(self._update_manager)
