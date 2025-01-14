@@ -8,15 +8,15 @@ import sys
 from datetime import datetime
 import time
 from collections import deque
-from scipy.signal import butter, lfilter
 import requests
 import json
 import argparse
 import signal
-import subprocess
 import psutil
-from contextlib import contextmanager
 import logging
+import torch
+import queue
+from threading import Thread
 
 def is_espeak_running():
     """Check if espeak is currently running"""
@@ -40,7 +40,7 @@ class VoiceProcessor:
         self.log = logging.getLogger('ears')
         
         # Audio parameters
-        self.CHUNK = 1024
+        self.CHUNK = 512  # Silero VAD requires 512 samples for 16kHz
         self.FORMAT = pyaudio.paFloat32
         self.CHANNELS = 1
         self.RATE = 16000
@@ -49,35 +49,18 @@ class VoiceProcessor:
         self.SILENCE_LIMIT = 0.7
         self.PREV_AUDIO = 0.5
         self.MIN_SILENCE_DETECTIONS = 3
-        self.MIN_AUDIO_DURATION = 0.35
         
-        # Thresholds
-        self.BASE_ENERGY_THRESHOLD = 0.005
-        self.ENERGY_THRESHOLD = self.BASE_ENERGY_THRESHOLD
-        self.ZCR_THRESHOLD = 0.2
-        self.SPEECH_MEMORY = 8
+        # Minimum audio duration in seconds
+        self.MIN_AUDIO_DURATION = 0.35
         
         # State
         self.status = "waiting"
         self.frames = []
         self.prev_frames = deque(maxlen=int(self.PREV_AUDIO * self.RATE / self.CHUNK))
-        self.silent_frames = 0
-        self.voiced_frames = 0
-        self.consecutive_silence = 0
         self.running = True
         
-        # Analysis buffers
-        self.energy_history = deque(maxlen=20)
-        self.zcr_history = deque(maxlen=20)
-        self.speech_history = deque([False] * self.SPEECH_MEMORY, maxlen=self.SPEECH_MEMORY)
-        
-        # Calibration
-        self.calibration_frames = []
-        self.calibrated = False
-        
-        # Initialize audio and filters
+        # Initialize audio
         self.p = pyaudio.PyAudio()
-        self.butter_filter = self._create_butter_filter()
         
         # Load config
         self.config = self.load_config()
@@ -89,6 +72,24 @@ class VoiceProcessor:
             "processing": "⚙️ ",
             "error": "❌"
         }
+        
+        # Initialize Silero VAD
+        torch.set_num_threads(1)
+        self.model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+                                         model='silero_vad',
+                                         force_reload=False)
+        self.get_speech_timestamps = utils[0]
+        
+        # VAD parameters
+        self.USE_ONNX = False  # Can be enabled for potentially faster inference
+        self.VAD_THRESHOLD = 0.5
+        self.audio_buffer = queue.Queue()
+        self.processing_thread = Thread(target=self._process_vad, daemon=True)
+        self.processing_thread.start()
+        
+        # Model requires 512 samples for 16kHz
+        if self.RATE != 16000:
+            raise ValueError("Sample rate must be 16kHz for Silero VAD")
         
         # Add hallucination filtering
         self.assume_hallucination = [
@@ -132,71 +133,87 @@ class VoiceProcessor:
                 'sample_rate': 16000
             }
 
-    def _create_butter_filter(self):
-        nyquist = self.RATE / 2
-        low = 300 / nyquist
-        high = 3000 / nyquist
-        b, a = butter(4, [low, high], btype='band')
-        return b, a
-
-    def _apply_bandpass(self, data):
-        return lfilter(self.butter_filter[0], self.butter_filter[1], data)
-
-    def _calculate_features(self, audio_data):
-        filtered_data = self._apply_bandpass(audio_data)
-        energy = np.sqrt(np.mean(filtered_data**2))
-        self.energy_history.append(energy)
-        zcr = np.mean(np.abs(np.diff(np.signbit(filtered_data))))
-        self.zcr_history.append(zcr)
+    def _process_vad(self):
+        """Process audio chunks using Silero VAD in a separate thread"""
+        audio_chunks = []
+        silence_chunks = 0
+        is_speaking = False
         
-        self.log.debug(
-            f"Energy: {energy:.6f}, ZCR: {zcr:.6f}, " +
-            f"Silent Frames: {self.silent_frames}, " +
-            f"Consecutive Silence: {self.consecutive_silence}"
-        )
-        
-        return energy, zcr
+        while self.running:
+            try:
+                chunk = self.audio_buffer.get(timeout=0.1)
+                # Convert to numpy array and make it writable
+                audio_data = np.frombuffer(chunk, dtype=np.float32).copy()
+                # Convert to tensor and ensure correct shape
+                audio_data = torch.from_numpy(audio_data)
+                
+                # Verify chunk size
+                if len(audio_data) != self.CHUNK:
+                    self.log.debug(f"Skipping irregular chunk size: {len(audio_data)}")
+                    continue
+                
+                # Add batch dimension and get speech probability
+                audio_data = audio_data.unsqueeze(0)  # Add batch dimension
+                speech_prob = self.model(audio_data, self.RATE).item()
+                
+                if speech_prob >= self.VAD_THRESHOLD:
+                    if not is_speaking:
+                        is_speaking = True
+                        self.update_status("listening")
+                        # Include previous audio for context
+                        audio_chunks.extend(list(self.prev_frames))
+                    
+                    audio_chunks.append(chunk)
+                    silence_chunks = 0
+                else:
+                    if is_speaking:
+                        silence_chunks += 1
+                        audio_chunks.append(chunk)
+                        
+                        # Check if silence duration exceeds limit
+                        if (silence_chunks * self.CHUNK / self.RATE >= self.SILENCE_LIMIT and 
+                            silence_chunks >= self.MIN_SILENCE_DETECTIONS):
+                            self._process_speech_segment(audio_chunks)
+                            audio_chunks = []
+                            silence_chunks = 0
+                            is_speaking = False
+                    else:
+                        self.prev_frames.append(chunk)
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.log.error(f"Error in VAD processing: {e}")
+                self.update_status("error")
 
-    def _calibrate(self, energy, zcr):
-        self.calibration_frames.append((energy, zcr))
-        if len(self.calibration_frames) >= int(self.RATE / self.CHUNK):
-            energies = [f[0] for f in self.calibration_frames]
-            zcrs = [f[1] for f in self.calibration_frames]
-            self.ENERGY_THRESHOLD = max(
-                self.BASE_ENERGY_THRESHOLD,
-                np.mean(energies) * 2 + np.std(energies)
-            )
-            self.ZCR_THRESHOLD = np.mean(zcrs) + np.std(zcrs)
-            self.log.debug(
-                f"Calibration complete:\n" +
-                f"Energy threshold: {self.ENERGY_THRESHOLD:.6f}\n" +
-                f"ZCR threshold: {self.ZCR_THRESHOLD:.6f}"
-            )
-            self.calibrated = True
-
-    def _is_speech(self, energy, zcr):
-        if not self.calibrated:
-            self._calibrate(energy, zcr)
-            return False
-
-        if len(self.energy_history) > 1:
-            recent_energy = np.mean(list(self.energy_history)[-10:])
-            self.ENERGY_THRESHOLD = max(
-                self.BASE_ENERGY_THRESHOLD,
-                recent_energy * 1.2
-            )
-
-        is_speech = (energy > self.ENERGY_THRESHOLD and 
-                    zcr > self.ZCR_THRESHOLD * 0.5)
-        
-        self.speech_history.append(is_speech)
-        
-        if not is_speech and self.status == "listening":
-            self.consecutive_silence += 1
-        else:
-            self.consecutive_silence = 0
+    def _process_speech_segment(self, audio_chunks):
+        """Process a complete speech segment"""
+        if not audio_chunks:
+            return
             
-        return sum(self.speech_history) >= 3
+        self.update_status("processing")
+        
+        # Combine audio chunks
+        audio_data = np.concatenate([np.frombuffer(chunk, dtype=np.float32) 
+                                   for chunk in audio_chunks])
+        
+        # Calculate duration in seconds
+        duration = len(audio_data) / self.RATE
+        
+        # Check if audio is too short
+        if duration < self.MIN_AUDIO_DURATION:
+            self.log.debug(f"Audio too short ({duration:.2f}s), skipping processing")
+            self.update_status("waiting")
+            return
+        
+        # Get transcription
+        transcription = self.transcribe_audio(audio_data)
+        if transcription and not self.is_likely_hallucination(transcription):
+            print(transcription, flush=True)
+        else:
+            self.log.debug("Transcription filtered or empty")
+        
+        self.update_status("waiting")
 
     def transcribe_audio(self, audio_data):
         try:
@@ -240,51 +257,6 @@ class VoiceProcessor:
             
         return False
 
-    def process_audio(self):
-        if not self.frames:
-            return
-            
-        self.update_status("processing")
-        
-        # Combine audio frames
-        all_frames = list(self.prev_frames) + self.frames
-        audio_data = np.concatenate([np.frombuffer(frame, dtype=np.float32) for frame in all_frames])
-        
-        # Calculate duration in seconds
-        duration = len(audio_data) / self.RATE
-        
-        # Check if audio is too short
-        if duration < self.MIN_AUDIO_DURATION:
-            self.log.debug(f"Audio too short ({duration:.2f}s), skipping processing")
-            # Reset state without processing
-            self.frames = []
-            self.prev_frames.clear()
-            self.speech_history.clear()
-            self.speech_history.extend([False] * self.SPEECH_MEMORY)
-            self.silent_frames = 0
-            self.voiced_frames = 0
-            self.consecutive_silence = 0
-            self.update_status("waiting")
-            return
-        
-        # Get transcription
-        transcription = self.transcribe_audio(audio_data)
-        if transcription and not self.is_likely_hallucination(transcription):
-            print(transcription, flush=True)
-        else:
-            self.log.debug("Transcription filtered or empty")
-        
-        # Reset state
-        self.frames = []
-        self.prev_frames.clear()
-        self.speech_history.clear()
-        self.speech_history.extend([False] * self.SPEECH_MEMORY)
-        self.silent_frames = 0
-        self.voiced_frames = 0
-        self.consecutive_silence = 0
-        
-        self.update_status("waiting")
-
     def update_status(self, new_status):
         """Update status and display indicator"""
         self.status = new_status
@@ -301,34 +273,10 @@ class VoiceProcessor:
             if self.status != "waiting":
                 self.log.debug("Espeak detected, pausing audio processing")
                 self.update_status("waiting")
-                self.frames = []
-                self.prev_frames.clear()
             return (in_data, pyaudio.paContinue)
-            
-        audio_data = np.frombuffer(in_data, dtype=np.float32)
-        energy, zcr = self._calculate_features(audio_data)
-        is_speech = self._is_speech(energy, zcr)
         
-        if is_speech:
-            if self.status == "waiting":
-                # Double check espeak isn't starting up
-                if is_espeak_running():
-                    return (in_data, pyaudio.paContinue)
-                self.update_status("listening")
-                self.frames.extend(list(self.prev_frames))
-            self.frames.append(in_data)
-            self.voiced_frames += 1
-            self.silent_frames = 0
-        else:
-            if self.status == "waiting":
-                self.prev_frames.append(in_data)
-            elif self.status == "listening":
-                self.silent_frames += 1
-                self.frames.append(in_data)
-                
-                if (self.silent_frames * self.CHUNK / self.RATE >= self.SILENCE_LIMIT and 
-                    self.consecutive_silence >= self.MIN_SILENCE_DETECTIONS):
-                    self.process_audio()
+        # Add audio chunk to processing queue
+        self.audio_buffer.put(in_data)
         
         return (in_data, pyaudio.paContinue)
 
