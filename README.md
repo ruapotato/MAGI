@@ -1,4 +1,6 @@
+# No longer developed, superseded by: https://github.com/ruapotato/Voice-Command
 # MAGI OS - Machine Augmented GTK Interface
+
 > An AI-native Linux distribution with deep LLM integration
 
 [![Website](https://img.shields.io/badge/Website-255.one-blue)](https://255.one)
